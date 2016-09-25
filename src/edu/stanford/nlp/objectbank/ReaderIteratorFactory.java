@@ -38,7 +38,7 @@ public class ReaderIteratorFactory implements Iterable<Reader> {
   /**
    * Constructs a ReaderIteratorFactory from the input sources
    * contained in the Collection.  The Collection should contain
-   * Objects of type File, String, URL and Reader.  See class
+   * Objects of type File, String, URL and/or Reader.  See class
    * description for details.
    *
    * @param c Collection of input sources.
@@ -71,7 +71,7 @@ public class ReaderIteratorFactory implements Iterable<Reader> {
 
 
   public ReaderIteratorFactory() {
-    c = new ArrayList<Object>();
+    c = new ArrayList<>();
   }
 
   /**
@@ -178,7 +178,7 @@ public class ReaderIteratorFactory implements Iterable<Reader> {
         if (o instanceof File) {
           File file = (File) o;
           if (file.isDirectory()) {
-            ArrayList<Object> l = new ArrayList<Object>();
+            ArrayList<Object> l = new ArrayList<>();
             l.addAll(Arrays.asList(file.listFiles()));
             while (iter.hasNext()) {
               l.add(iter.next());

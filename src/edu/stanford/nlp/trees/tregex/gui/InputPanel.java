@@ -28,7 +28,8 @@
 //    Licensing: parser-support@lists.stanford.edu
 //http://www-nlp.stanford.edu/software/tregex.shtml
 
-package edu.stanford.nlp.trees.tregex.gui;
+package edu.stanford.nlp.trees.tregex.gui; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.awt.Color;
 import java.awt.ComponentOrientation;
@@ -68,7 +69,10 @@ import edu.stanford.nlp.util.Generics;
  *
  * @author Anna Rafferty
  */
-public class InputPanel extends JPanel implements ActionListener, ChangeListener {
+public class InputPanel extends JPanel implements ActionListener, ChangeListener  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(InputPanel.class);
 
   private static final long serialVersionUID = -8219840036914495876L;
 
@@ -79,8 +83,8 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
   private JButton cancel;
   private JButton help;
   private JTextArea tregexPattern;
-  private JComboBox recentTregexPatterns;
-  private DefaultComboBoxModel recentTregexPatternsModel;
+  private JComboBox<String> recentTregexPatterns;
+  private DefaultComboBoxModel<String> recentTregexPatternsModel;
   private int numRecentPatterns = 5;// we save the last n patterns in our combo box, where n = numRecentPatterns
   private JTextArea tsurgeonScript;
   private TregexPatternCompiler compiler;//this should change only when someone changes the headfinder/basic category finder
@@ -111,7 +115,7 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
   private InputPanel() {
     //data stuff
     compiler = new TregexPatternCompiler();
-    historyList = new ArrayList<HistoryEntry>();
+    historyList = new ArrayList<>();
 
     //layout/image stuff
     this.setLayout(new GridBagLayout());
@@ -249,8 +253,8 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
   //separated out to make constructor more readable
   private JPanel makeTregexPatternArea() {
     //combo box with recent searches
-    recentTregexPatternsModel = new DefaultComboBoxModel();
-    recentTregexPatterns = new JComboBox(recentTregexPatternsModel);
+    recentTregexPatternsModel = new DefaultComboBoxModel<>();
+    recentTregexPatterns = new JComboBox<>(recentTregexPatternsModel);
     recentTregexPatterns.setMinimumSize(new Dimension(120, 24));
     recentTregexPatterns.addActionListener(this);
 
@@ -442,6 +446,7 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
     parent.repaint();
   }
 
+  @Override
   public void actionPerformed(ActionEvent e) {
     Object source = e.getSource();
     if (source == findMatches) {
@@ -471,6 +476,7 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
     }
   }
 
+  @Override
   public void stateChanged(ChangeEvent e) {
     JSlider source = (JSlider) e.getSource();
     int fontSize = source.getValue();
@@ -541,7 +547,7 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
       public void run() {
         useProgressBar(true);
 
-        final List<TreeFromFile> trees = new ArrayList<TreeFromFile>();
+        final List<TreeFromFile> trees = new ArrayList<>();
 
         //Go through the treebanks and get all the trees
         List<FileTreeNode> treebanks = FilePanel.getInstance().getActiveTreebanks();
@@ -639,12 +645,12 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
           final TRegexGUITreeVisitor visitor = getMatchTreeVisitor(text,this);
           if (visitor == null) return; //means the tregex errored out
           if (this.isInterrupted()) {
-            returnToValidState(text, visitor, new ArrayList<TreeFromFile>());
+            returnToValidState(text, visitor, new ArrayList<>());
             return;
           }
-          //System.err.println("Running Script with matches: " + visitor.getMatches());
+          //log.info("Running Script with matches: " + visitor.getMatches());
           List<TreeFromFile> trees = visitor.getMatches();
-          final List<TreeFromFile> modifiedTrees = new ArrayList<TreeFromFile>();
+          final List<TreeFromFile> modifiedTrees = new ArrayList<>();
           for (TreeFromFile tff : trees) {
             if (this.isInterrupted()) {
               returnToValidState(text, visitor, trees);
@@ -755,8 +761,9 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
 
 
   /**
-   * Called when a pattern cannot be compiled or some other error occurs; resets gui to valid state
-   * Thread safe
+   * Called when a pattern cannot be compiled or some other error occurs; resets gui to valid state.
+   * Thread safe.
+   *
    * @param txt Error message text (friendly text appropriate for users)
    * @param e The exception that caused the problem
    */
@@ -843,7 +850,7 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
     TRegexGUITreeVisitor(TregexPattern p) { //String[] handles) {
       this.p = p;
       //this.handles = handles;
-      matchedTrees = new ArrayList<TreeFromFile>();
+      matchedTrees = new ArrayList<>();
       matchedParts = Generics.newHashMap();
     }
 
@@ -858,7 +865,7 @@ public class InputPanel extends JPanel implements ActionListener, ChangeListener
       while (match.find()) {
         Tree curMatch = match.getMatch();
         //System.out.println("Found match is: " + curMatch);
-        if (matchedPartList == null) matchedPartList = new ArrayList<Tree>();
+        if (matchedPartList == null) matchedPartList = new ArrayList<>();
         matchedPartList.add(curMatch);
         numMatches++;
       } // end while match.find()

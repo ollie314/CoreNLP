@@ -1,4 +1,5 @@
-package edu.stanford.nlp.parser.metrics;
+package edu.stanford.nlp.parser.metrics; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.PrintWriter;
 import java.text.DecimalFormat;
@@ -10,8 +11,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 
-import edu.stanford.nlp.international.Languages;
-import edu.stanford.nlp.international.Languages.Language;
+import edu.stanford.nlp.international.Language;
 import edu.stanford.nlp.ling.CoreLabel;
 import edu.stanford.nlp.ling.HasTag;
 import edu.stanford.nlp.ling.Label;
@@ -36,7 +36,10 @@ import edu.stanford.nlp.util.StringUtils;
  * @author Spence Green
  *
  */
-public class TaggingEval extends AbstractEval {
+public class TaggingEval extends AbstractEval  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(TaggingEval.class);
 
   private final Lexicon lex;
 
@@ -62,17 +65,17 @@ public class TaggingEval extends AbstractEval {
     this.lex = lex;
 
     if(doCatLevelEval) {
-      precisions = new ClassicCounter<String>();
-      recalls = new ClassicCounter<String>();
-      f1s = new ClassicCounter<String>();
+      precisions = new ClassicCounter<>();
+      recalls = new ClassicCounter<>();
+      f1s = new ClassicCounter<>();
 
-      precisions2 = new ClassicCounter<String>();
-      recalls2 = new ClassicCounter<String>();
-      pnums2 = new ClassicCounter<String>();
-      rnums2 = new ClassicCounter<String>();
+      precisions2 = new ClassicCounter<>();
+      recalls2 = new ClassicCounter<>();
+      pnums2 = new ClassicCounter<>();
+      rnums2 = new ClassicCounter<>();
 
-      percentOOV = new ClassicCounter<String>();
-      percentOOV2 = new ClassicCounter<String>();
+      percentOOV = new ClassicCounter<>();
+      percentOOV2 = new ClassicCounter<>();
     }
   }
 
@@ -186,7 +189,7 @@ public class TaggingEval extends AbstractEval {
       cats.addAll(precisions.keySet());
       cats.addAll(recalls.keySet());
 
-      Map<Double,String> f1Map = new TreeMap<Double,String>();
+      Map<Double,String> f1Map = new TreeMap<>();
       for (String cat : cats) {
         double pnum2 = pnums2.getCount(cat);
         double rnum2 = rnums2.getCount(cat);
@@ -232,7 +235,7 @@ public class TaggingEval extends AbstractEval {
     usage.append(String.format("Usage: java %s [OPTS] gold guess\n\n",TaggingEval.class.getName()));
     usage.append("Options:\n");
     usage.append("  -v         : Verbose mode.\n");
-    usage.append("  -l lang    : Select language settings from " + Languages.listOfLanguages() + "\n");
+    usage.append("  -l lang    : Select language settings from " + Language.langList + "\n");
     usage.append("  -y num     : Skip gold trees with yields longer than num.\n");
     usage.append("  -c         : Compute LP/LR/F1 by category.\n");
     usage.append("  -e         : Input encoding.\n");
@@ -274,7 +277,7 @@ public class TaggingEval extends AbstractEval {
       if(opt.getKey() == null) continue;
       if(opt.getKey().equals("-l")) {
         Language lang = Language.valueOf(opt.getValue()[0].trim());
-        tlpp = Languages.getLanguageParams(lang);
+        tlpp = lang.params;
 
       } else if(opt.getKey().equals("-y")) {
         maxGoldYield = Integer.parseInt(opt.getValue()[0].trim());
@@ -289,14 +292,14 @@ public class TaggingEval extends AbstractEval {
         encoding = opt.getValue()[0];
 
       } else {
-        System.err.println(usage.toString());
+        log.info(usage.toString());
         System.exit(-1);
       }
 
       //Non-option arguments located at key null
       String[] rest = argsMap.get(null);
       if(rest == null || rest.length < minArgs) {
-        System.err.println(usage.toString());
+        log.info(usage.toString());
         System.exit(-1);
       }
       goldFile = rest[0];

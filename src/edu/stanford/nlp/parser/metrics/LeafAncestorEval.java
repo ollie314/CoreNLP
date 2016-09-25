@@ -1,4 +1,5 @@
-package edu.stanford.nlp.parser.metrics;
+package edu.stanford.nlp.parser.metrics; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.File;
 import java.io.PrintWriter;
@@ -10,8 +11,7 @@ import java.util.Random;
 import java.util.Stack;
 import java.util.TreeMap;
 
-import edu.stanford.nlp.international.Languages;
-import edu.stanford.nlp.international.Languages.Language;
+import edu.stanford.nlp.international.Language;
 import edu.stanford.nlp.ling.CoreLabel;
 import edu.stanford.nlp.ling.HasIndex;
 import edu.stanford.nlp.ling.Label;
@@ -35,7 +35,10 @@ import edu.stanford.nlp.util.StringUtils;
  * @author Spence Green
  *
  */
-public class LeafAncestorEval {
+public class LeafAncestorEval  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(LeafAncestorEval.class);
 
   private final String name;
 
@@ -76,15 +79,15 @@ public class LeafAncestorEval {
 
     ((HasIndex) t.label()).setIndex(0);
 
-    final Stack<Tree> treeStack = new Stack<Tree>();
+    final Stack<Tree> treeStack = new Stack<>();
     treeStack.push(t);
 
-    final Stack<CoreLabel> labelStack = new Stack<CoreLabel>();
+    final Stack<CoreLabel> labelStack = new Stack<>();
     CoreLabel rootLabel = new CoreLabel(t.label());
     rootLabel.setIndex(0);
     labelStack.push(rootLabel);
 
-    final List<List<CoreLabel>> lineages = new ArrayList<List<CoreLabel>>();
+    final List<List<CoreLabel>> lineages = new ArrayList<>();
 
     while(!treeStack.isEmpty()) {
       Tree node = treeStack.pop();
@@ -93,7 +96,7 @@ public class LeafAncestorEval {
         labelStack.pop();
 
       if(node.isPreTerminal()) {
-        List<CoreLabel> lin = new ArrayList<CoreLabel>(labelStack);
+        List<CoreLabel> lin = new ArrayList<>(labelStack);
         lineages.add(lin);
 
       } else {
@@ -134,7 +137,7 @@ public class LeafAncestorEval {
 
   public void evaluate(Tree guess, Tree gold, PrintWriter pw) {
     if(gold == null || guess == null) {
-      System.err.printf("%s: Cannot compare against a null gold or guess tree!\n",this.getClass().getName());
+      System.err.printf("%s: Cannot compare against a null gold or guess tree!%n",this.getClass().getName());
       return;
     }
 
@@ -165,10 +168,10 @@ public class LeafAncestorEval {
       sentNum++;
 
     } else {
-      System.err.printf("%s: Number of guess (%d) gold (%d) don't match!\n",this.getClass().getName(),guessLineages.size(),goldLineages.size());
-      System.err.println("Cannot evaluate!");
-      System.err.printf("GUESS tree:\n%s\n", guess.toString());
-      System.err.printf("GOLD tree:\n%s\n", gold.toString());
+      System.err.printf("%s: Number of guess (%d) gold (%d) don't match!%n",this.getClass().getName(),guessLineages.size(),goldLineages.size());
+      log.info("Cannot evaluate!");
+      System.err.printf("GUESS tree:%n%s%n", guess.toString());
+      System.err.printf("GOLD tree:%n%s%n", gold.toString());
     }
   }
 
@@ -213,14 +216,15 @@ public class LeafAncestorEval {
     double sentEx = 100.0 * sentExact / sentNum;
 
     if(verbose) {
-      Map<Double,List<CoreLabel>> avgMap = new TreeMap<Double,List<CoreLabel>>();
-      for (List<CoreLabel> lineage : catAvg.keySet()) {
-        double avg = catAvg.get(lineage) / catNum.get(lineage);
-        if(new Double(avg).equals(Double.NaN)) avg = -1.0;
-        if(avgMap.containsKey(avg))
-          avgMap.put(avg + (rand.nextDouble()/10000.0), lineage);
-        else
-          avgMap.put(avg, lineage);
+      Map<Double,List<CoreLabel>> avgMap = new TreeMap<>();
+      for (Map.Entry<List<CoreLabel>, Double> entry : catAvg.entrySet()) {
+        double avg = entry.getValue() / catNum.get(entry.getKey());
+        if (Double.isNaN(avg)) { avg = -1.0; }
+        if (avgMap.containsKey(avg)) {
+          avgMap.put(avg + (rand.nextDouble() / 10000.0), entry.getKey());
+        } else {
+          avgMap.put(avg, entry.getKey());
+        }
       }
 
       pw.println("============================================================");
@@ -239,7 +243,7 @@ public class LeafAncestorEval {
       for (List<CoreLabel> lineage : avgMap.values()) {
         if(catNum.get(lineage) < 30.0) continue;
         double avg = catAvg.get(lineage) / catNum.get(lineage);
-        pw.printf(" %.3f\t%d\t%s\n",avg, (int) ((double)catNum.get(lineage)),toString(lineage));
+        pw.printf(" %.3f\t%d\t%s%n",avg, (int) ((double)catNum.get(lineage)),toString(lineage));
       }
 
       pw.println("============================================================");
@@ -251,10 +255,10 @@ public class LeafAncestorEval {
 
 
   private static final String USAGE =
-    String.format("Usage: java %s [OPTS] goldFile guessFile%n%nOptions:%n  -l lang   : Language name %s%n" +
-            "  -y num    : Skip gold trees with yields longer than num.%n  -v        : Verbose output%n",
-            LeafAncestorEval.class.getName(),
-            Languages.listOfLanguages());
+      String.format("Usage: java %s [OPTS] goldFile guessFile%n%nOptions:%n  -l lang   : Language name %s%n" +
+              "  -y num    : Skip gold trees with yields longer than num.%n  -v        : Verbose output%n",
+              LeafAncestorEval.class.getName(),
+          Language.langList);
 
   private static final int MIN_ARGS = 2;
 
@@ -278,20 +282,20 @@ public class LeafAncestorEval {
 
     for(Map.Entry<String, String[]> opt : argsMap.entrySet()) {
       String key = opt.getKey();
-      if(key == null) {
-        continue;
-
-      } else if(key.equals("-y")) {
-        MAX_GOLD_YIELD = Integer.valueOf(opt.getValue()[0]);
-
-      } else if(key.equals("-l")) {
-        LANGUAGE = Language.valueOf(opt.getValue()[0]);
-
-      } else if(key.equals("-v")) {
-        VERBOSE = true;
-
-      } else {
-        return false;
+      if (key != null) {
+        switch (key) {
+          case "-y":
+            MAX_GOLD_YIELD = Integer.parseInt(opt.getValue()[0]);
+            break;
+          case "-l":
+            LANGUAGE = Language.valueOf(opt.getValue()[0]);
+            break;
+          case "-v":
+            VERBOSE = true;
+            break;
+          default:
+            return false;
+        }
       }
     }
 
@@ -314,11 +318,11 @@ public class LeafAncestorEval {
   public static void main(String[] args) {
 
     if(!validateCommandLine(args)) {
-      System.err.println(USAGE);
+      log.info(USAGE);
       System.exit(-1);
     }
 
-    final TreebankLangParserParams tlpp = Languages.getLanguageParams(LANGUAGE);
+    final TreebankLangParserParams tlpp = LANGUAGE.params;
     final PrintWriter pwOut = tlpp.pw();
 
     final Treebank guessTreebank = tlpp.diskTreebank();
@@ -380,7 +384,7 @@ public class LeafAncestorEval {
     }
 
     pwOut.println("================================================================================");
-    if(skippedGuessTrees != 0) pwOut.printf("%s %d guess trees\n", "Unable to evaluate", skippedGuessTrees);
+    if(skippedGuessTrees != 0) pwOut.printf("%s %d guess trees%n", "Unable to evaluate", skippedGuessTrees);
     metric.display(true, pwOut);
     pwOut.close();
   }

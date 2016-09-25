@@ -26,6 +26,10 @@
         <include name="*.jar"/>
         <exclude name="javanlp*"/>
       </fileset>
+      <fileset dir="${basedir}/liblocal">
+        <include name="*.jar"/>
+        <exclude name="javanlp*"/>
+      </fileset>
     </path>
   </target>
 
@@ -101,14 +105,39 @@
       <!-- <compilerarg value="-Xmaxerrs"/>
            <compilerarg value="20"/> -->
         <compilerarg value="-Xlint:cast"/>
+        <compilerarg value="-Xlint:classfile"/>
+        <compilerarg value="-Xlint:divzero"/>
+        <compilerarg value="-Xlint:empty"/>
         <compilerarg value="-Xlint:finally"/>
         <compilerarg value="-Xlint:path"/>
-   <!-- <compilerarg value="-Xlint"/>
+        <compilerarg value="-Xlint:try"/>
+<!--
+        <compilerarg value="-Xlint:deprecation"/>
+        <compilerarg value="-Xlint:dep-ann"/>
+        <compilerarg value="-Xlint:fallthrough"/>
+        <compilerarg value="-Xlint:options"/>
+        <compilerarg value="-Xlint:overrides"/>
+        <compilerarg value="-Xlint:processing"/>
+        <compilerarg value="-Xlint:rawtypes"/>
+        <compilerarg value="-Xlint:serial"/>
+        <compilerarg value="-Xlint:static"/>
+        <compilerarg value="-Xlint:unchecked"/>
+        <compilerarg value="-Xlint:varargs"/>
+-->
+<!--    <compilerarg value="-Xlint:all"/>
         <compilerarg value="-Xmaxwarns"/>
-        <compilerarg value="10000"/> -->
+        <compilerarg value="10000"/>  -->
     </javac>
-    <copy file="${source.path}/edu/stanford/nlp/trees/ENUniversalPOS.tsurgeon"
-         todir="${build.path}/edu/stanford/nlp/trees/" />
+    <copy todir="${build.path}/edu/stanford/nlp/pipeline/demo">
+      <fileset dir="${source.path}/edu/stanford/nlp/pipeline/demo">
+        <exclude name="**/*.java"/>
+      </fileset>
+    </copy>
+    <copy todir="${build.path}/edu/stanford/nlp/pipeline">
+      <fileset dir="${source.path}/edu/stanford/nlp/pipeline">
+        <exclude name="**/*.java"/>
+      </fileset>
+    </copy>
   </target>
 
   <target name="test" depends="classpath,compile"
@@ -149,7 +178,7 @@
   <target name="slowitest" depends="classpath,compile"
           description="Run really slow integration tests">
     <echo message="${ant.project.name}" />
-    <junit fork="yes" maxmemory="8g" printsummary="off" outputtoformatters="false" forkmode="perTest" haltonfailure="true">
+    <junit fork="yes" maxmemory="12g" printsummary="off" outputtoformatters="false" forkmode="perTest" haltonfailure="true">
       <classpath refid="classpath"/>
       <classpath path="${build.path}"/>
       <classpath path="${data.path}"/>
@@ -284,7 +313,7 @@
         <include name="commons-lang3-3.1.jar"/>
         <include name="xom-1.2.10.jar"/>
         <include name="joda-time.jar"/>
-        <include name="jollyday-0.4.7.jar"/>
+        <include name="jollyday-0.4.9.jar"/>
       </lib>
       <zipfileset prefix="WEB-INF/data"
                   file="/u/nlp/data/pos-tagger/distrib/english-left3words-distsim.tagger"/>
@@ -299,6 +328,48 @@
       <zipfileset file="${source.path}/edu/stanford/nlp/time/suservlet/calendarview.css"/>
       <zipfileset file="${source.path}/edu/stanford/nlp/time/suservlet/calendarview.js"/>
       <zipfileset file="${source.path}/edu/stanford/nlp/time/suservlet/prototype.js"/>
+    </war>
+  </target>
+  
+  <target name="openie.war" depends="compile,jar"
+          description="build the openie webapp">
+    <war destfile="openie.war"
+         webxml="${source.path}/edu/stanford/nlp/naturalli/demo/web.xml">
+      <lib dir=".">
+        <include name="javanlp-core.jar"/>
+      </lib>
+      <zipfileset prefix="WEB-INF/data"
+                  file="/u/nlp/data/pos-tagger/distrib/english-left3words-distsim.tagger"/>
+      <zipfileset prefix="WEB-INF/data"
+                  file="${source.path}/edu/stanford/nlp/time/rules/*"/>
+      <zipfileset prefix="WEB-INF/data"
+                    file="${source.path}/edu/stanford/nlp/time/holidays/*"/>
+      <zipfileset prefix="WEB-INF/data"
+                  file="/u/nlp/data/ner/goodClassifiers/english.all.3class.distsim.crf.ser.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                  file="/u/nlp/data/ner/goodClassifiers/english.conll.4class.distsim.crf.ser.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                  file="/u/nlp/data/ner/goodClassifiers/english.muc.7class.distsim.crf.ser.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                  file="/u/nlp/data/depparser/nn/distrib/english_SD.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                  file="/u/nlp/data/lexparser/englishPCFG.ser.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                   file="/home/gabor/workspace/naturalli/etc/clauseSplitterModel.ser.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                   file="/home/gabor/workspace/naturalli/etc/pp.tab.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                   file="/home/gabor/workspace/naturalli/etc/obj.tab.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                   file="/home/gabor/workspace/naturalli/etc/privative.tab.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                   file="/home/gabor/workspace/naturalli/etc/subj_obj_pp.tab.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                   file="/home/gabor/workspace/naturalli/etc/subj_pp_obj.tab.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                   file="/home/gabor/workspace/naturalli/etc/subj_pp_pp.tab.gz"/>
+      <zipfileset prefix="WEB-INF/data"
+                   file="/home/gabor/workspace/naturalli/etc/subj_pp.tab.gz"/>
     </war>
   </target>
 
@@ -318,7 +389,9 @@
         <zipfileset prefix="WEB-INF/data"
                     file="/u/nlp/data/lexparser/arabicFactored.ser.gz"/>
         <zipfileset prefix="WEB-INF/data"
-                    file="/u/nlp/data/lexparser/xinhuaFactored.ser.gz"/>
+                    file="/u/nlp/data/lexparser/frenchFactored.ser.gz"/>
+        <zipfileset prefix="WEB-INF/data"
+                    file="/u/nlp/data/lexparser/chineseFactored.ser.gz"/>
         <zipfileset prefix="WEB-INF/data/chinesesegmenter"
                     file="/u/nlp/data/gale/segtool/stanford-seg/classifiers-2010/05202008-ctb6.processed-chris6.lex.gz"/>
         <zipfileset prefix="WEB-INF/data/chinesesegmenter"
@@ -375,7 +448,7 @@
         <include name="xom-1.2.10.jar"/>
         <include name="xml-apis.jar"/>
         <include name="joda-time.jar"/>
-        <include name="jollyday-0.4.7.jar"/>
+        <include name="jollyday-0.4.9.jar"/>
       </lib>
       <!-- note for John: c:/Users/John Bauer/nlp/stanford-releases -->
       <lib dir="/u/nlp/data/StanfordCoreNLPModels">

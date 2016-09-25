@@ -1,7 +1,9 @@
-package edu.stanford.nlp.util;
+package edu.stanford.nlp.util; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.lang.reflect.Array;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 
@@ -14,7 +16,10 @@ import java.util.function.Predicate;
  * @author Huy Nguyen (htnguyen@cs.stanford.edu)
  * @author Michel Galley (mgalley@stanford.edu)
  */
-public class ArrayUtils {
+public class ArrayUtils  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(ArrayUtils.class);
 
   /**
    * Should not be instantiated
@@ -36,7 +41,7 @@ public class ArrayUtils {
       }
     }
 
-    List<Byte> bytes = new ArrayList<Byte>();
+    List<Byte> bytes = new ArrayList<>();
 
     int index = 0;
     int prevNum = 0;
@@ -111,7 +116,7 @@ public class ArrayUtils {
 
     boolean gettingSize = true;
     int size = 0;
-    List<Integer> ints = new ArrayList<Integer>();
+    List<Integer> ints = new ArrayList<>();
     int gap = 0;
     int prevNum = 0;
 
@@ -167,7 +172,7 @@ public class ArrayUtils {
       }
     }
 
-    List<Byte> bytes = new ArrayList<Byte>();
+    List<Byte> bytes = new ArrayList<>();
 
     int index = 0;
     int prevNum = 0;
@@ -260,7 +265,7 @@ public class ArrayUtils {
     boolean gettingSize1 = true;
     boolean gettingSize2 = false;
     int size1 = 0;
-    List<Integer> ints = new ArrayList<Integer>();
+    List<Integer> ints = new ArrayList<>();
     int gap = 0;
     int size2 = 0;
     int prevNum = 0;
@@ -361,7 +366,7 @@ public class ArrayUtils {
 //       int prevNum = 0;
 //       for (int f : orig) {
 //         StringBuilder bits1 = new StringBuilder();
-//               System.err.print(f+"\t");
+//               log.info(f+"\t");
 //               String n = Integer.toString(f-prevNum, 2);
 //               String n1 = Integer.toString(n.length(), 2);
 //               for (int ii = 0; ii < n1.length(); ii++) {
@@ -370,7 +375,7 @@ public class ArrayUtils {
 //               bits1.append("0");
 //               bits1.append(n1.substring(1));
 //               bits1.append(n.substring(1));
-//               System.err.print(bits1+"\t");
+//               log.info(bits1+"\t");
 //               bits.append(bits1);
 //               prevNum = f;
 //             }
@@ -664,7 +669,7 @@ public class ArrayUtils {
    * singleton list back with just that array as an element.
    */
   public static List<Integer> asList(int[] array) {
-    List<Integer> l = new ArrayList<Integer>();
+    List<Integer> l = new ArrayList<>();
     for (int i : array) {
       l.add(i);
     }
@@ -897,24 +902,29 @@ public class ArrayUtils {
   }
    */
 
+  public static List<Integer> getSubListIndex(Object[] tofind, Object[] tokens){
+     return getSubListIndex(tofind, tokens, (o1) -> o1.first().equals(o1.second()));
+  }
+
   /**
    * If tofind is a part of tokens, it finds the ****starting index***** of tofind in tokens
    * If tofind is not a sub-array of tokens, then it returns null
    * note that tokens sublist should have the exact elements and order as in tofind
    * @param tofind array you want to find in tokens
    * @param tokens
+   * @param matchingFunction function that takes (tofindtoken, token) pair and returns whether they match
    * @return starting index of the sublist
    */
-  public static List<Integer> getSubListIndex(Object[] tofind, Object[] tokens){
+  public static List<Integer> getSubListIndex(Object[] tofind, Object[] tokens, Function<Pair, Boolean> matchingFunction){
     if(tofind.length > tokens.length)
       return null;
-    List<Integer> allIndices = new ArrayList<Integer>();
+    List<Integer> allIndices = new ArrayList<>();
     boolean matched = false;
     int index = -1;
     int lastUnmatchedIndex = 0;
     for(int i = 0 ; i < tokens.length;){
       for(int j = 0; j < tofind.length ;){
-        if(tofind[j].equals(tokens[i])){
+        if(matchingFunction.apply(new Pair(tofind[j], tokens[i]))){
           index = i;
           i++;
           j++;
@@ -994,5 +1004,16 @@ public class ArrayUtils {
     if (a1.length < a2.length) return -1;
     if (a1.length > a2.length) return 1;
     return 0;
+  }
+
+  public static String toString(double[] doubles, String glue) {
+    String s = "";
+    for(int i = 0; i < doubles.length; i++){
+      if(i==0)
+        s = String.valueOf(doubles[i]);
+      else
+        s+= glue + String.valueOf(doubles[i]);
+    }
+    return s;
   }
 }

@@ -1,41 +1,50 @@
 package edu.stanford.nlp.trees;
+import edu.stanford.nlp.parser.lexparser.LexicalizedParser;
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.*;
 import java.util.*;
 import java.util.function.Predicate;
 
 import edu.stanford.nlp.ling.IndexedWord;
+import edu.stanford.nlp.process.Morphology;
+import edu.stanford.nlp.semgraph.SemanticGraph;
+import edu.stanford.nlp.semgraph.SemanticGraphEdge;
+import edu.stanford.nlp.semgraph.semgrex.SemgrexMatcher;
+import edu.stanford.nlp.semgraph.semgrex.SemgrexPattern;
 import edu.stanford.nlp.util.*;
-
 import static edu.stanford.nlp.trees.EnglishGrammaticalRelations.*;
 import static edu.stanford.nlp.trees.GrammaticalRelation.*;
 
 /**
- * A GrammaticalStructure for English.
+ * A GrammaticalStructure for English. This is the class that produces Stanford Dependencies.
  * <p/>
- * The Stanford parser should be run with the "-retainNPTmpSubcategories"
- * option! <b>Caveat emptor!</b> This is a work in progress. Suggestions
- * welcome.
+ * For feeding Stanford parser trees into this class, the Stanford parser should be run with the
+ * "-retainNPTmpSubcategories" option for best results!
  *
  * @author Bill MacCartney
  * @author Marie-Catherine de Marneffe
  * @author Christopher Manning
  * @author Daniel Cer (CoNLLX format and alternative user selected dependency
  *         printer/reader interface)
+ * @author John Bauer
  */
-public class EnglishGrammaticalStructure extends GrammaticalStructure {
+public class EnglishGrammaticalStructure extends GrammaticalStructure  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(EnglishGrammaticalStructure.class);
 
   private static final long serialVersionUID = -1866362375001969402L;
 
   private static final boolean DEBUG = System.getProperty("EnglishGrammaticalStructure", null) != null;
 
   /**
-   * Construct a new <code>GrammaticalStructure</code> from an existing parse
-   * tree. The new <code>GrammaticalStructure</code> has the same tree structure
+   * Construct a new {@code EnglishGrammaticalStructure} from an existing parse
+   * tree. The new {@code GrammaticalStructure} has the same tree structure
    * and label values as the given tree (but no shared storage). As part of
    * construction, the parse tree is analyzed using definitions from
-   * {@link GrammaticalRelation <code>GrammaticalRelation</code>} to populate
-   * the new <code>GrammaticalStructure</code> with as many labeled grammatical
+   * {@link GrammaticalRelation {@code GrammaticalRelation}} to populate
+   * the new {@code GrammaticalStructure} with as many labeled grammatical
    * relations as it can.
    *
    * @param t Parse tree to make grammatical structure from
@@ -51,38 +60,30 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * @param puncFilter Filter to remove punctuation dependencies
    */
   public EnglishGrammaticalStructure(Tree t, Predicate<String> puncFilter) {
-    this(t, puncFilter, new SemanticHeadFinder(true), true);
+    this(t, puncFilter, new SemanticHeadFinder(true));
   }
 
   /**
-   * This gets used by GrammaticalStructureFactory (by reflection). DON'T DELETE.
-   *
-   * @param t Parse tree to make grammatical structure from
-   * @param puncFilter Filter to remove punctuation dependencies
-   * @param hf HeadFinder to use when building it
-   */
-  public EnglishGrammaticalStructure(Tree t, Predicate<String> puncFilter, HeadFinder hf) {
-    this(t, puncFilter, hf, true);
-  }
-
-  /**
-   * Construct a new <code>GrammaticalStructure</code> from an existing parse
-   * tree. The new <code>GrammaticalStructure</code> has the same tree structure
+   * Construct a new {@code GrammaticalStructure} from an existing parse
+   * tree. The new {@code GrammaticalStructure} has the same tree structure
    * and label values as the given tree (but no shared storage). As part of
    * construction, the parse tree is analyzed using definitions from
-   * {@link GrammaticalRelation <code>GrammaticalRelation</code>} to populate
-   * the new <code>GrammaticalStructure</code> with as many labeled grammatical
+   * {@link GrammaticalRelation {@code GrammaticalRelation}} to populate
+   * the new {@code GrammaticalStructure} with as many labeled grammatical
    * relations as it can.
+   *
+   * Once upon a time this method had an extra parameter as to whether to operate
+   * in a threadsafe manner. We decided that that was a really bad idea, and this
+   * method now always acts in a threadsafe manner.
+   * This method gets used by GrammaticalStructureFactory (by reflection). DON'T DELETE.
    *
    * @param t Parse tree to make grammatical structure from
    * @param puncFilter Filter for punctuation words
    * @param hf HeadFinder to use when building it
-   * @param threadSafe Whether or not to support simultaneous instances among multiple
-   *          threads
    */
-  public EnglishGrammaticalStructure(Tree t, Predicate<String> puncFilter, HeadFinder hf, boolean threadSafe) {
+  public EnglishGrammaticalStructure(Tree t, Predicate<String> puncFilter, HeadFinder hf) {
     // the tree is normalized (for index and functional tag stripping) inside CoordinationTransformer
-    super(t, EnglishGrammaticalRelations.values(threadSafe), threadSafe ? EnglishGrammaticalRelations.valuesLock() : null, new CoordinationTransformer(hf), hf, puncFilter);
+    super(t, EnglishGrammaticalRelations.values(), EnglishGrammaticalRelations.valuesLock(), new CoordinationTransformer(hf), hf, puncFilter, Filters.acceptFilter());
   }
 
   /** Used for postprocessing CoNLL X dependencies */
@@ -117,7 +118,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
 
 
   @Override
-  protected void correctDependencies(Collection<TypedDependency> list) {
+  protected void correctDependencies(List<TypedDependency> list) {
     if (DEBUG) {
       printListSorted("At correctDependencies:", list);
     }
@@ -132,12 +133,12 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
   }
 
   private static void printListSorted(String title, Collection<TypedDependency> list) {
-    List<TypedDependency> lis = new ArrayList<TypedDependency>(list);
+    List<TypedDependency> lis = new ArrayList<>(list);
     Collections.sort(lis);
     if (title != null) {
-      System.err.println(title);
+      log.info(title);
     }
-    System.err.println(lis);
+    log.info(lis);
   }
 
   @Override
@@ -145,6 +146,15 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
     if (DEBUG) {
       printListSorted("At postProcessDependencies:", list);
     }
+
+    SemanticGraph sg = new SemanticGraph(list);
+    correctWHAttachment(sg);
+    list.clear();
+    list.addAll(sg.typedDependencies());
+    if (DEBUG) {
+      printListSorted("After correcting WH movement", list);
+    }
+
     convertRel(list);
     if (DEBUG) {
       printListSorted("After converting rel:", list);
@@ -244,6 +254,59 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
     }
   }
 
+
+  /* Used by correctWHAttachment */
+  private static SemgrexPattern XCOMP_PATTERN = SemgrexPattern.compile("{}=root >xcomp {}=embedded >/^(dep|dobj)$/ {}=wh ?>/([di]obj)/ {}=obj");
+
+  private static Morphology morphology = new Morphology();
+
+  /**
+   * Tries to correct complicated cases of WH-movement in
+   * sentences such as "What does Mary seem to have?" in
+   * which "What" should attach to "have" instead of the
+   * control verb.
+   *
+   * @param sg The Semantic graph to operate on.
+   */
+  private static void correctWHAttachment(SemanticGraph sg) {
+    /* Semgrexes require a graph with a root. */
+    if (sg.getRoots().isEmpty())
+      return;
+
+    SemanticGraph sgCopy = sg.makeSoftCopy();
+    SemgrexMatcher matcher = XCOMP_PATTERN.matcher(sgCopy);
+    while (matcher.findNextMatchingNode()) {
+      IndexedWord root = matcher.getNode("root");
+      IndexedWord embeddedVerb = matcher.getNode("embedded");
+      IndexedWord wh = matcher.getNode("wh");
+      IndexedWord dobj = matcher.getNode("obj");
+
+      /* Check if the object is a WH-word. */
+      if (wh.tag().startsWith("W")) {
+        boolean reattach = false;
+        /* If the control verb already has an object, then
+           we have to reattach th WH-word to the verb in the embedded clause. */
+        if (dobj != null) {
+          reattach = true;
+        } else {
+          /* If the control verb can't have an object, we also have to reattach. */
+          String lemma = morphology.lemma(root.value(), root.tag());
+          if (lemma.matches(EnglishPatterns.NP_V_S_INF_VERBS_REGEX)) {
+            reattach = true;
+          }
+        }
+
+        if (reattach) {
+          SemanticGraphEdge edge = sg.getEdge(root, wh);
+          if (edge != null) {
+            sg.removeEdge(edge);
+            sg.addEdge(embeddedVerb, wh, DIRECT_OBJECT, Double.NEGATIVE_INFINITY, false);
+          }
+        }
+      }
+    }
+  }
+
   /**
    * What we do in this method is look for temporary dependencies of
    * the type "rel".  These occur in sentences such as "I saw the man
@@ -252,7 +315,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * fighting for", we should have pobj(for, which).
    */
   private static void convertRel(List<TypedDependency> list) {
-    List<TypedDependency> newDeps = new ArrayList<TypedDependency>();
+    List<TypedDependency> newDeps = new ArrayList<>();
     for (TypedDependency rel : list) {
       if (rel.reln() != RELATIVE) {
         continue;
@@ -268,7 +331,24 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
           continue;
         }
         if (!prep.gov().equals(rel.gov())) {
-          continue;
+
+          //Try to find a clausal complement with a preposition without an
+          //object. For sentences such as "What am I good at?"
+          boolean hasCompParent = false;
+          for (TypedDependency prep2 : list) {
+            if (prep2.reln() == XCLAUSAL_COMPLEMENT
+                || prep2.reln() == ADJECTIVAL_COMPLEMENT
+                || prep2.reln() == CLAUSAL_COMPLEMENT
+                || prep2.reln() == ROOT) {
+              if (prep.gov().equals(prep2.dep()) && prep2.gov().equals(rel.gov())) {
+                hasCompParent = true;
+                break;
+              }
+            }
+          }
+
+          if ( ! hasCompParent)
+            continue;
         }
 
         // at this point, we have two dependencies as in the Mr. Bush
@@ -358,7 +438,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * </dl>
    */
   @Override
-  protected void collapseDependencies(List<TypedDependency> list, boolean CCprocess, boolean includeExtras) {
+  protected void collapseDependencies(List<TypedDependency> list, boolean CCprocess, Extras includeExtras) {
     if (DEBUG) {
       printListSorted("collapseDependencies: CCproc: " + CCprocess + " includeExtras: " + includeExtras, list);
     }
@@ -402,15 +482,17 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       printListSorted("After conj:", list);
     }
 
-    if (includeExtras) {
+    if (includeExtras.doRef) {
       addRef(list);
       if (DEBUG) {
         printListSorted("After adding ref:", list);
       }
 
-      collapseReferent(list);
-      if (DEBUG) {
-        printListSorted("After collapse referent:", list);
+      if (includeExtras.collapseRef) {
+        collapseReferent(list);
+        if (DEBUG) {
+          printListSorted("After collapse referent:", list);
+        }
       }
     }
 
@@ -421,7 +503,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       }
     }
 
-    if (includeExtras) {
+    if (includeExtras.doSubj) {
       addExtraNSubj(list);
       if (DEBUG) {
         printListSorted("After adding extra nsubj:", list);
@@ -446,13 +528,13 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
 
   @Override
   protected void collapseDependenciesTree(List<TypedDependency> list) {
-    collapseDependencies(list, false, false);
+    collapseDependencies(list, false, Extras.NONE);
   }
 
   /**
    * Does some hard coding to deal with relation in CONJP. For now we deal with:
    * but not, if not, instead of, rather than, but rather GO TO negcc <br>
-   * as well as, not to mention, but also, & GO TO and.
+   * as well as, not to mention, but also, &amp; GO TO and.
    *
    * @param conj The head dependency of the conjunction marker
    * @return A GrammaticalRelation made from a normalized form of that
@@ -490,7 +572,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       if (!map.containsKey(typedDep.dep())) {
         // NB: Here and in other places below, we use a TreeSet (which extends
         // SortedSet) to guarantee that results are deterministic)
-        map.put(typedDep.dep(), new TreeSet<TypedDependency>());
+        map.put(typedDep.dep(), new TreeSet<>());
       }
       map.get(typedDep.dep()).add(typedDep);
 
@@ -526,13 +608,13 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       }
     }
 
-    // System.err.println(map);
-    // if (DEBUG) System.err.println("Subject map: " + subjectMap);
-    // if (DEBUG) System.err.println("Object map: " + objectMap);
-    // System.err.println(rcmodHeads);
+    // log.info(map);
+    // if (DEBUG) log.info("Subject map: " + subjectMap);
+    // if (DEBUG) log.info("Object map: " + objectMap);
+    // log.info(rcmodHeads);
 
     // create a new list of typed dependencies
-    Collection<TypedDependency> newTypedDeps = new ArrayList<TypedDependency>(list);
+    Collection<TypedDependency> newTypedDeps = new ArrayList<>(list);
 
     // find typed deps of form conj(gov,dep)
     for (TypedDependency td : list) {
@@ -542,10 +624,10 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
 
         // look at the dep in the conjunct
         Set<TypedDependency> gov_relations = map.get(gov);
-        // System.err.println("gov " + gov);
+        // log.info("gov " + gov);
         if (gov_relations != null) {
           for (TypedDependency td1 : gov_relations) {
-            // System.err.println("gov rel " + td1);
+            // log.info("gov rel " + td1);
             IndexedWord newGov = td1.gov();
             // in the case of errors in the basic dependencies, it
             // is possible to have overlapping newGov & dep
@@ -558,13 +640,13 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
                 // to prevent wrong propagation in the case of long dependencies in relative clauses
                 if (newRel != DIRECT_OBJECT && newRel != NOMINAL_SUBJECT) {
                   if (DEBUG) {
-                    System.err.println("Adding new " + newRel + " dependency from " + newGov + " to " + dep + " (subj/obj case)");
+                    log.info("Adding new " + newRel + " dependency from " + newGov + " to " + dep + " (subj/obj case)");
                   }
                   newTypedDeps.add(new TypedDependency(newRel, newGov, dep));
                 }
               } else {
                 if (DEBUG) {
-                  System.err.println("Adding new " + newRel + " dependency from " + newGov + " to " + dep);
+                  log.info("Adding new " + newRel + " dependency from " + newGov + " to " + dep);
                 }
                 newTypedDeps.add(new TypedDependency(newRel, newGov, dep));
               }
@@ -577,7 +659,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         // the dep is a verb and the dep doesn't have a subject relation
         // then we want to add a subject relation for the dep.
         // (By testing for the dep to be a verb, we are going to miss subject of
-        // copular verbs! but
+        // copula verbs! but
         // is it safe to relax this assumption?? i.e., just test for the subject
         // part)
         // CDM 2008: I also added in JJ, since participial verbs are often
@@ -606,7 +688,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
             }
           }
           if (DEBUG) {
-            System.err.println("Adding new " + relation + " dependency from " + dep + " to " + tdsubj.dep() + " (subj propagation case)");
+            log.info("Adding new " + relation + " dependency from " + dep + " to " + tdsubj.dep() + " (subj propagation case)");
           }
           newTypedDeps.add(new TypedDependency(relation, dep, tdsubj.dep()));
         }
@@ -625,7 +707,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         // && ! prepcDep.contains(gov)) {
         // TypedDependency tdobj = objectMap.get(gov);
         // if (DEBUG) {
-        // System.err.println("Adding new " + tdobj.reln() + " dependency from "
+        // log.info("Adding new " + tdobj.reln() + " dependency from "
         // + dep + " to " + tdobj.dep() + " (obj propagation case)");
         // }
         // newTypedDeps.add(new TypedDependency(tdobj.reln(), dep,
@@ -659,7 +741,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         IndexedWord gov = td.gov();
         GrammaticalRelation conj = conjValue(td.dep().value());
         if (DEBUG) {
-          System.err.println("Set conj to " + conj + " based on " + td);
+          log.info("Set conj to " + conj + " based on " + td);
         }
 
         // find other deps of that gov having reln "conj"
@@ -669,14 +751,14 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
             if (td1.reln() == CONJUNCT) { // i.e., "conj"
               // change "conj" to the actual (lexical) conjunction
               if (DEBUG) {
-                System.err.println("Changing " + td1 + " to have relation " + conj);
+                log.info("Changing " + td1 + " to have relation " + conj);
               }
               td1.setReln(conj);
               foundOne = true;
             } else if (td1.reln() == COORDINATION) {
               conj = conjValue(td1.dep().value());
               if (DEBUG) {
-                System.err.println("Set conj to " + conj + " based on " + td1);
+                log.info("Set conj to " + conj + " based on " + td1);
               }
             }
           }
@@ -701,13 +783,13 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
 
   /**
    * This method will collapse a referent relation such as follows. e.g.:
-   * "The man that I love ... " ref(man, that) dobj(love, that) -> dobj(love,
-   * man)
+   * "The man that I love &hellip; " ref(man, that) dobj(love, that) -&gt;
+   * dobj(love, man)
    */
   private static void collapseReferent(Collection<TypedDependency> list) {
     // find typed deps of form ref(gov, dep)
     // put them in a List for processing; remove them from the set of deps
-    List<TypedDependency> refs = new ArrayList<TypedDependency>();
+    List<TypedDependency> refs = new ArrayList<>();
     for (Iterator<TypedDependency> iter = list.iterator(); iter.hasNext();) {
       TypedDependency td = iter.next();
       if (td.reln() == REFERENT) {
@@ -726,11 +808,14 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         // creation of a unit cycle that probably leaves something else
         // disconnected) [cdm Jan 2010]
         if (td.dep().equals(dep) && td.reln() != REFERENT && !td.gov().equals(ant)) {
-          if (DEBUG)
-            System.err.print("referent: changing " + td);
+          if (DEBUG) {
+            log.info("referent: changing " + td);
+          }
           td.setDep(ant);
-          if (DEBUG)
-            System.err.println(" to " + td);
+          td.setExtra();
+          if (DEBUG) {
+            log.info(" to " + td);
+          }
         }
       }
     }
@@ -744,7 +829,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * for the ref TypedDependency.
    */
   private static void addRef(Collection<TypedDependency> list) {
-    List<TypedDependency> newDeps = new ArrayList<TypedDependency>();
+    List<TypedDependency> newDeps = new ArrayList<>();
 
     for (TypedDependency rcmod : list) {
       if (rcmod.reln() != RELATIVE_CLAUSE_MODIFIER) {
@@ -812,7 +897,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * sentences such as "he decided not to" with no following verb.
    */
   private static void addExtraNSubj(Collection<TypedDependency> list) {
-    List<TypedDependency> newDeps = new ArrayList<TypedDependency>();
+    List<TypedDependency> newDeps = new ArrayList<>();
 
     for (TypedDependency xcomp : list) {
       if (xcomp.reln() != XCLAUSAL_COMPLEMENT) {
@@ -892,7 +977,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    */
   private static void correctSubjPass(Collection<TypedDependency> list) {
     // put in a list verbs having an auxpass
-    List<IndexedWord> list_auxpass = new ArrayList<IndexedWord>();
+    List<IndexedWord> list_auxpass = new ArrayList<>();
     for (TypedDependency td : list) {
       if (td.reln() == AUX_PASSIVE_MODIFIER) {
         list_auxpass.add(td.gov());
@@ -901,11 +986,11 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
     for (TypedDependency td : list) {
       // correct nsubj
       if (td.reln() == NOMINAL_SUBJECT && list_auxpass.contains(td.gov())) {
-        // System.err.println("%%% Changing subj to passive: " + td);
+        // log.info("%%% Changing subj to passive: " + td);
         td.setReln(NOMINAL_PASSIVE_SUBJECT);
       }
       if (td.reln() == CLAUSAL_SUBJECT && list_auxpass.contains(td.gov())) {
-        // System.err.println("%%% Changing subj to passive: " + td);
+        // log.info("%%% Changing subj to passive: " + td);
         td.setReln(CLAUSAL_PASSIVE_SUBJECT);
       }
 
@@ -917,7 +1002,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       // it's probably okay to keep it a dep.  So I'm disabling this.
       // String tag = td.dep().tag();
       // if (td.reln() == DEPENDENT && (tag.equals("PRP$") || tag.equals("WP$"))) {
-      //  System.err.println("%%% Unrecognized basic possessive pronoun: " + td);
+      //  log.info("%%% Unrecognized basic possessive pronoun: " + td);
       //  td.setReln(POSSESSION_MODIFIER);
       // }
     }
@@ -936,7 +1021,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
 
     // Man oh man, how gnarly is the logic of this method....
 
-    Collection<TypedDependency> newTypedDeps = new ArrayList<TypedDependency>();
+    Collection<TypedDependency> newTypedDeps = new ArrayList<>();
 
     // Construct a map from tree nodes to the set of typed
     // dependencies in which the node appears as governor.
@@ -946,7 +1031,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
 
     for (TypedDependency typedDep : list) {
       if (!map.containsKey(typedDep.gov())) {
-        map.put(typedDep.gov(), new TreeSet<TypedDependency>());
+        map.put(typedDep.gov(), new TreeSet<>());
       }
       map.get(typedDep.gov()).add(typedDep);
 
@@ -968,16 +1053,13 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         }
       }
     }
-    // System.err.println("here's the vmod list: " + vmod);
+    // log.info("here's the vmod list: " + vmod);
 
     // Do preposition conjunction interaction for
     // governor p NP and p NP case ... a lot of special code cdm jan 2006
 
     for (TypedDependency td1 : list) {
       if (td1.reln() != PREPOSITIONAL_MODIFIER) {
-        continue;
-      }
-      if (td1.reln() == KILL) {
         continue;
       }
 
@@ -992,9 +1074,9 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       // unique: the head prep and whether it should be pobj
       Pair<TypedDependency, Boolean> prepDep = null;
       TypedDependency ccDep = null; // treat as unique
-      // list of dep and prepOtherDep and pobj (or  pcomp)
-      List<Triple<TypedDependency, TypedDependency, Boolean>> conjs = new ArrayList<Triple<TypedDependency, TypedDependency, Boolean>>();
-      Set<TypedDependency> otherDtrs = new TreeSet<TypedDependency>();
+      // list of dep and prepOtherDep and pobj (or pcomp)
+      List<Triple<TypedDependency, TypedDependency, Boolean>> conjs = new ArrayList<>();
+      Set<TypedDependency> otherDtrs = new TreeSet<>();
 
       // first look for a conj(prep, prep) (there might be several conj relations!!!)
       boolean samePrepositionInEachConjunct = true;
@@ -1030,7 +1112,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
             if (conjIndex < td2Dep.index()) {
               conjIndex = td2Dep.index();
             }
-            conjs.add(new Triple<TypedDependency, TypedDependency, Boolean>(td2, prepOtherDep, pobj));
+            conjs.add(new Triple<>(td2, prepOtherDep, pobj));
           }
         }
       } // end td2:possibles
@@ -1051,7 +1133,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         } else {
           IndexedWord td2Dep = td2.dep();
           String td2DepPOS = td2Dep.tag();
-          // System.err.println("prepDep find: td1.reln: " + td1.reln() +
+          // log.info("prepDep find: td1.reln: " + td1.reln() +
           // "; td2.reln: " + td2.reln() + "; td1DepPos: " + td1DepPOS +
           // "; td2DepPos: " + td2DepPOS + "; index " + index +
           // "; td2.dep().index(): " + td2.dep().index());
@@ -1059,7 +1141,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
             // same index trick, in case we have multiple deps
             // I deleted this to see if it helped [cdm Jan 2010] &&
             // td2.dep().index() < index)
-            prepDep = new Pair<TypedDependency, Boolean>(td2, td2.reln() != PREPOSITIONAL_COMPLEMENT);
+            prepDep = new Pair<>(td2, td2.reln() != PREPOSITIONAL_COMPLEMENT);
           } else if (!inConjDeps(td2, conjs)) {// don't want to add the conjDep
             // again!
             otherDtrs.add(td2);
@@ -1068,21 +1150,19 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       }
 
       if (prepDep == null || ccDep == null) {
-        continue; // we can't deal with it in the hairy prep/conj interaction
-        // case!
+        continue; // we can't deal with it in the hairy prep/conj interaction case!
       }
 
       if (DEBUG) {
-        if (ccDep != null) {
-          System.err.println("!! Conj and prep case:");
-          System.err.println("  td1 (prep): " + td1);
-          System.err.println("  Kids of td1 are: " + possibles);
-          System.err.println("  prepDep: " + prepDep);
-          System.err.println("  ccDep: " + ccDep);
-          System.err.println("  conjs: " + conjs);
-          System.err.println("  samePrepositionInEachConjunct: " + samePrepositionInEachConjunct);
-          System.err.println("  otherDtrs: " + otherDtrs);
-        }
+        // ccDep must be non-null given test above
+        log.info("!! Conj and prep case:");
+        log.info("  td1 (prep): " + td1);
+        log.info("  Kids of td1 are: " + possibles);
+        log.info("  prepDep: " + prepDep);
+        log.info("  ccDep: " + ccDep);
+        log.info("  conjs: " + conjs);
+        log.info("  samePrepositionInEachConjunct: " + samePrepositionInEachConjunct);
+        log.info("  otherDtrs: " + otherDtrs);
       }
 
       // check if we have the same prepositions in the conjunction
@@ -1095,8 +1175,8 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         TypedDependency tdNew = new TypedDependency(reln, td1.gov(), prepDep.first().dep());
         newTypedDeps.add(tdNew);
         if (DEBUG) {
-          System.err.println("PrepPoss Conj branch (two parallel PPs) adding: " + tdNew);
-          System.err.println("  removing: " + td1 + "  " + prepDep + "  " + ccDep);
+          log.info("PrepPoss Conj branch (two parallel PPs) adding: " + tdNew);
+          log.info("  removing: " + td1 + "  " + prepDep + "  " + ccDep);
         }
         td1.setReln(KILL);// remember these are "used up"
         prepDep.first().setReln(KILL);
@@ -1111,16 +1191,16 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
             // something like (PP in or in (NP Serbia)), with the two
             // prepositions the same. We just clean up the mess.
             if (DEBUG) {
-              System.err.println("  apparent misparse: same P twice with only one NP object (prepOtherDep is null)");
-              System.err.println("  removing: " + conjDep);
+              log.info("  apparent misparse: same P twice with only one NP object (prepOtherDep is null)");
+              log.info("  removing: " + conjDep);
             }
             ccDep.setReln(KILL);
           } else {
             TypedDependency tdNew2 = new TypedDependency(conjValue(ccDep.dep().value()), prepDep.first().dep(), prepOtherDep.dep());
             newTypedDeps.add(tdNew2);
             if (DEBUG) {
-              System.err.println("  adding: " + tdNew2);
-              System.err.println("  removing: " + conjDep + "  " + prepOtherDep);
+              log.info("  adding: " + tdNew2);
+              log.info("  removing: " + conjDep + "  " + prepOtherDep);
             }
             prepOtherDep.setReln(KILL);
           }
@@ -1130,11 +1210,11 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         // promote dtrs that would be orphaned
         for (TypedDependency otd : otherDtrs) {
           if (DEBUG) {
-            System.err.print("Changed " + otd);
+            log.info("Changed " + otd);
           }
           otd.setGov(td1.gov());
           if (DEBUG) {
-            System.err.println(" to " + otd);
+            log.info(" to " + otd);
           }
         }
 
@@ -1150,11 +1230,11 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         // it does, since they're not automatically deleted
         // Some things in possibles may have already been changed, so check gov
         if (DEBUG) {
-          System.err.println("td1: " + td1 + "; possibles: " + possibles);
+          log.info("td1: " + td1 + "; possibles: " + possibles);
         }
         for (TypedDependency td2 : possibles) {
           // if (DEBUG) {
-          // System.err.println("[a] td2.reln " + td2.reln() + " td2.gov " +
+          // log.info("[a] td2.reln " + td2.reln() + " td2.gov " +
           // td2.gov() + " td1.dep " + td1.dep());
           // }
           if (td2.reln() != KILL && td2.gov().equals(td1.dep())) { // && td2.reln()
@@ -1162,7 +1242,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
             // && td2.reln()
             // != CONJUNCT
             if (DEBUG) {
-              System.err.println("Changing " + td2 + " to have governor of " + td1 + " [a]");
+              log.info("Changing " + td2 + " to have governor of " + td1 + " [a]");
             }
             td2.setGov(td1.gov());
           }
@@ -1186,13 +1266,21 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       // prep_over(jumped, fence)
       // conj_and(jumped, jumped)
       // prep_through(jumped, hoop)
+      // Extra complication:
+      // If "jumped" is already part of a conjunction, we should add the new one off that rather than chaining
+      IndexedWord conjHead = td1.gov();
+      for (TypedDependency td3 : list) {
+        if (td3.dep().equals(td1.gov()) && td3.reln().equals(CONJUNCT)) {
+          conjHead = td3.gov();
+        }
+      }
 
       GrammaticalRelation reln = determinePrepRelation(map, vmod, td1, td1, prepDep.second());
       TypedDependency tdNew = new TypedDependency(reln, td1.gov(), prepDep.first().dep());
       newTypedDeps.add(tdNew);
       if (DEBUG) {
-        System.err.println("ConjPP (different preps) adding: " + tdNew);
-        System.err.println("  deleting: " + td1 + "  " + prepDep.first() + "  " + ccDep);
+        log.info("ConjPP (different preps) adding: " + tdNew);
+        log.info("  deleting: " + td1 + "  " + prepDep.first() + "  " + ccDep);
       }
       td1.setReln(KILL);// remember these are "used up"
       prepDep.first().setReln(KILL);
@@ -1213,8 +1301,11 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         IndexedWord label = td1.gov().makeSoftCopy(copyNumber);
         copyNumber++;
 
-        // now we add the conjunction relation between td1.gov and the copy
+        // now we add the conjunction relation between conjHead (either td1.gov
+        // or what it is itself conjoined with) and the copy
         // the copy has the same label as td1.gov() but is another TreeGraphNode
+        // todo: Or that's the plan; there are a couple of knock on changes to fix before we can do this!
+        // TypedDependency tdNew2 = new TypedDependency(conjValue(ccDep.dep().value()), conjHead, label);
         TypedDependency tdNew2 = new TypedDependency(conjValue(ccDep.dep().value()), td1.gov(), label);
         newTypedDeps.add(tdNew2);
 
@@ -1227,8 +1318,8 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         newTypedDeps.add(tdNew3);
 
         if (DEBUG) {
-          System.err.println("  adding: " + tdNew2 + "  " + tdNew3);
-          System.err.println("  deleting: " + conjDep + "  " + prepOtherDep);
+          log.info("  adding: " + tdNew2 + "  " + tdNew3);
+          log.info("  deleting: " + conjDep + "  " + prepOtherDep);
         }
         conjDep.setReln(KILL);
         prepOtherDep.setReln(KILL);
@@ -1259,7 +1350,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
         if (td2.reln() != KILL) { // && td2.reln() != COORDINATION &&
           // td2.reln() != CONJUNCT) {
           if (DEBUG) {
-            System.err.println("Changing " + td2 + " to have governor of " + td1 + " [b]");
+            log.info("Changing " + td2 + " to have governor of " + td1 + " [b]");
           }
           td2.setGov(td1.gov());
         }
@@ -1298,7 +1389,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
               // to avoid disconnected constituents
               // OK, we have a pair td1, td2 to collapse to td3
               if (DEBUG) {
-                System.err.println("(Single prep/poss base case collapsing " + td1 + " and " + td2);
+                log.info("(Single prep/poss base case collapsing " + td1 + " and " + td2);
               }
 
               // check whether we are in a pcomp case:
@@ -1309,7 +1400,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
               GrammaticalRelation reln = determinePrepRelation(map, vmod, td1, td1, pobj);
               TypedDependency td3 = new TypedDependency(reln, td1.gov(), td2.dep());
               if (DEBUG) {
-                System.err.println("PP adding: " + td3 + " deleting: " + td1 + ' ' + td2);
+                log.info("PP adding: " + td3 + " deleting: " + td1 + ' ' + td2);
               }
               // add it to map to deal with recursive cases like "achieved this (PP (PP in part) with talent)"
               map.get(td3.gov()).add(td3);
@@ -1337,7 +1428,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
           if (td2.reln() != KILL) { // && td2.reln() != COORDINATION &&
             // td2.reln() != CONJUNCT) {
             if (DEBUG) {
-              System.err.println("Changing " + td2 + " to have governor of " + td1 + " [c]");
+              log.info("Changing " + td2 + " to have governor of " + td1 + " [c]");
             }
             td2.setGov(td1.gov());
           }
@@ -1351,7 +1442,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       TypedDependency td = iter.next();
       if (td.reln() == KILL) {
         if (DEBUG) {
-          System.err.println("Removing dep killed in poss/prep (conj) collapse: " + td);
+          log.info("Removing dep killed in poss/prep (conj) collapse: " + td);
         }
         iter.remove();
       }
@@ -1440,12 +1531,12 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * prep|advmod|dep|amod(gov, mwp[0]) <br/>
    * dep(mpw[0],mwp[1]) <br/>
    * pobj|pcomp(mwp[1], compl) or pobj|pcomp(mwp[0], compl) <br/>
-   * -> prep_mwp[0]_mwp[1](gov, compl) <br/>
+   * -&gt; prep_mwp[0]_mwp[1](gov, compl) <br/>
    *
    * prep|advmod|dep|amod(gov, mwp[1]) <br/>
    * dep(mpw[1],mwp[0]) <br/>
    * pobj|pcomp(mwp[1], compl) or pobj|pcomp(mwp[0], compl) <br/>
-   * -> prep_mwp[0]_mwp[1](gov, compl)
+   * -&gt; prep_mwp[0]_mwp[1](gov, compl)
    * <p/>
    *
    * The collapsing has to be done at once in order to know exactly which node
@@ -1457,7 +1548,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    *          list of typedDependencies to work on
    */
   private static void collapse2WP(Collection<TypedDependency> list) {
-    Collection<TypedDependency> newTypedDeps = new ArrayList<TypedDependency>();
+    Collection<TypedDependency> newTypedDeps = new ArrayList<>();
 
     for (String[] mwp : MULTIWORD_PREPS) {
       // first look for patterns such as:
@@ -1479,23 +1570,17 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
   /**
    * Collapse multiword preposition of the following format:
    * prep|advmod|dep|amod(gov, mwp0) dep(mpw0,mwp1) pobj|pcomp(mwp1, compl) or
-   * pobj|pcomp(mwp0, compl) -> prep_mwp0_mwp1(gov, compl)
+   * pobj|pcomp(mwp0, compl) -&gt; prep_mwp0_mwp1(gov, compl)
    * <p/>
    *
-   * @param list
-   *          List of typedDependencies to work on,
-   * @param newTypedDeps
-   *          List of typedDependencies that we construct
-   * @param str_mwp0
-   *          First part of the multiword preposition to construct the collapsed
+   * @param list List of typedDependencies to work on,
+   * @param newTypedDeps List of typedDependencies that we construct
+   * @param str_mwp0 First part of the multiword preposition to construct the collapsed
    *          preposition
-   * @param str_mwp1
-   *          Second part of the multiword preposition to construct the
+   * @param str_mwp1 Second part of the multiword preposition to construct the
    *          collapsed preposition
-   * @param w_mwp0
-   *          First part of the multiword preposition that we look for
-   * @param w_mwp1
-   *          Second part of the multiword preposition that we look for
+   * @param w_mwp0 First part of the multiword preposition that we look for
+   * @param w_mwp1 Second part of the multiword preposition that we look for
    */
   private static void collapseMultiWordPrep(Collection<TypedDependency> list, Collection<TypedDependency> newTypedDeps, String str_mwp0, String str_mwp1, String w_mwp0, String w_mwp1) {
 
@@ -1565,8 +1650,8 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
     // Necessarily from the above: prep != null, dep != null, pobj != null, newtd != null
 
     if (DEBUG) {
-      System.err.println("Removing " + prep + ", " + dep + ", and " + pobj);
-      System.err.println("  and adding " + newtd);
+      log.info("Removing " + prep + ", " + dep + ", and " + pobj);
+      log.info("  and adding " + newtd);
     }
     prep.setReln(KILL);
     dep.setReln(KILL);
@@ -1601,7 +1686,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
 
   /**
    * Collapse multi-words preposition of the following format: advmod|prt(gov,
-   * mwp[0]) prep(gov,mwp[1]) pobj|pcomp(mwp[1], compl) ->
+   * mwp[0]) prep(gov,mwp[1]) pobj|pcomp(mwp[1], compl) -&gt;
    * prep_mwp[0]_mwp[1](gov, compl)
    * <p/>
    *
@@ -1609,7 +1694,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    *          List of typedDependencies to work on
    */
   private static void collapse2WPbis(Collection<TypedDependency> list) {
-    Collection<TypedDependency> newTypedDeps = new ArrayList<TypedDependency>();
+    Collection<TypedDependency> newTypedDeps = new ArrayList<>();
 
     for (String[] mwp : MULTIWORD_PREPS) {
       newTypedDeps.clear();
@@ -1709,7 +1794,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * X(mwp0,mwp1) <br/>
    * X(mwp1,mwp2) <br/>
    * pobj|pcomp(mwp2, compl) <br/>
-   * -> prep_mwp[0]_mwp[1]_mwp[2](gov, compl)
+   * -&gt; prep_mwp[0]_mwp[1]_mwp[2](gov, compl)
    * <p/>
    *
    * It also takes flat annotation into account: <br/>
@@ -1717,7 +1802,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * X(mwp0,mwp1) <br/>
    * X(mwp0,mwp2) <br/>
    * pobj|pcomp(mwp0, compl) <br/>
-   * -> prep_mwp[0]_mwp[1]_mwp[2](gov, compl)
+   * -&gt; prep_mwp[0]_mwp[1]_mwp[2](gov, compl)
    * <p/>
    *
    *
@@ -1725,7 +1810,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    *          List of typedDependencies to work on
    */
   private static void collapse3WP(Collection<TypedDependency> list) {
-    Collection<TypedDependency> newTypedDeps = new ArrayList<TypedDependency>();
+    Collection<TypedDependency> newTypedDeps = new ArrayList<>();
 
     // first, loop over the prepositions for NP annotation
     for (String[] mwp : THREEWORD_PREPS) {
@@ -1960,14 +2045,13 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * flat annotation. This handles e.g., "because of" (PP (IN because) (IN of)
    * ...), "such as" (PP (JJ such) (IN as) ...)
    * <p/>
-   * prep(gov, mwp[1]) dep(mpw[1], mwp[0]) pobj(mwp[1], compl) ->
+   * prep(gov, mwp[1]) dep(mpw[1], mwp[0]) pobj(mwp[1], compl) -&gt;
    * prep_mwp[0]_mwp[1](gov, compl)
    *
-   * @param list
-   *          List of typedDependencies to work on
+   * @param list List of typedDependencies to work on
    */
   private static void collapseFlatMWP(Collection<TypedDependency> list) {
-    Collection<TypedDependency> newTypedDeps = new ArrayList<TypedDependency>();
+    Collection<TypedDependency> newTypedDeps = new ArrayList<>();
 
     for (String[] mwp : MULTIWORD_PREPS) {
       newTypedDeps.clear();
@@ -2101,7 +2185,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
       TypedDependency td = iter.next();
       if (td.reln() == KILL) {
         if (DEBUG) {
-          System.err.println("Removing duplicate relation: " + td);
+          log.info("Removing duplicate relation: " + td);
         }
         iter.remove();
       }
@@ -2117,7 +2201,7 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
    * is a List, they may both now be in the List.
    */
   private static void removeExactDuplicates(Collection<TypedDependency> list) {
-    Set<TypedDependency> set = new TreeSet<TypedDependency>(list);
+    Set<TypedDependency> set = new TreeSet<>(list);
     list.clear();
     list.addAll(set);
   }
@@ -2137,6 +2221,10 @@ public class EnglishGrammaticalStructure extends GrammaticalStructure {
     public EnglishGrammaticalStructure build(List<TypedDependency> tdeps, TreeGraphNode root) {
       return new EnglishGrammaticalStructure(tdeps, root);
     }
+  }
+
+  public static void main(String args[]) {
+    GrammaticalStructureConversionUtils.convertTrees(args, "en-sd");
   }
 
 } // end class EnglishGrammaticalStructure

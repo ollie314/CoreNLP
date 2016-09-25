@@ -1,12 +1,11 @@
-package edu.stanford.nlp.international.spanish;
+package edu.stanford.nlp.international.spanish; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import edu.stanford.nlp.io.IOUtils;
 import edu.stanford.nlp.util.Pair;
 
 import java.io.BufferedReader;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
@@ -26,7 +25,10 @@ import java.util.regex.Pattern;
  * @author Jon Gauthier
  * @author Ishita Prasad
  */
-public final class SpanishVerbStripper implements Serializable {
+public final class SpanishVerbStripper implements Serializable  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(SpanishVerbStripper.class);
 
   // The following three classes of verb forms can carry attached
   // pronouns:
@@ -35,19 +37,20 @@ public final class SpanishVerbStripper implements Serializable {
   //   - Gerunds
   //   - Affirmative imperatives
 
-  /* Hashmap of singleton instances */
-  private static final Map<String, SpanishVerbStripper> instances = new HashMap<String, SpanishVerbStripper>();
+  /* HashMap of singleton instances */
+  private static final Map<String, SpanishVerbStripper> instances = new HashMap<>();
 
-  private HashMap<String, String> dict;
+  private final HashMap<String, String> dict;
 
   private static final String DEFAULT_DICT =
     "edu/stanford/nlp/international/spanish/enclitic-inflections.data";
 
+  /** Any attached pronouns. The extra grouping around this pattern allows it to be used in String concatenations. */
   private static final String PATTERN_ATTACHED_PRONOUNS =
-    "(?:(?:(?:[mts]e|n?os|les?)(?:l[oa]s?)?)|l[oa]s?)$";
+    "(?:(?:[mts]e|n?os|les?)(?:l[oa]s?)?|l[oa]s?)$";
 
   private static final Pattern pTwoAttachedPronouns =
-    Pattern.compile("(?:([mts]e|n?os|les?)(l[eoa]s?)?)$");
+    Pattern.compile("([mts]e|n?os|les?)(l[eoa]s?)$");
 
   private static final Pattern pOneAttachedPronoun =
     Pattern.compile("([mts]e|n?os|les?|l[oa]s?)$");
@@ -70,31 +73,32 @@ public final class SpanishVerbStripper implements Serializable {
 
   /**
    * Sets up dictionary of valid verbs and their POS info from an input file.
-   * The input file must be a list of tab-seperated verb-POS pairs, one verb
-   * per line.
+   * The input file must be a list of whitespace-separated verb-lemma-POS triples, one verb
+   * form per line.
    *
    * @param dictPath the path to the dictionary file
-   */  
-  private void setupDictionary(String dictPath) {
+   */
+  private static HashMap<String, String> setupDictionary(String dictPath) {
+    HashMap<String, String> dictionary = new HashMap<>();
+    BufferedReader br = null;
     try {
-      dict = new HashMap<String, String>();
-      BufferedReader br = new BufferedReader(new InputStreamReader(
-        IOUtils.getInputStreamFromURLOrClasspathOrFileSystem(dictPath), "UTF-8"));
-      String line = br.readLine();
-      for(; line != null; line = br.readLine()) {
+      br = IOUtils.readerFromString(dictPath);
+      for (String line; (line = br.readLine()) != null; ) {
         String[] words = line.trim().split("\\s");
-        if(words.length < 3) {
-          System.err.printf("SpanishVerbStripper: addings words to dict, missing word, ignoring line\n");
+        if (words.length < 3) {
+          System.err.printf("SpanishVerbStripper: adding words to dict, missing fields, ignoring line: %s%n", line);
+        } else {
+          dictionary.put(words[0], words[2]);
         }
-        dict.put(words[0], words[2]);
       }
     } catch (UnsupportedEncodingException e) {
       e.printStackTrace();
-    } catch (FileNotFoundException e) {
-      System.err.println("Could not load Spanish data file " + dictPath);
     } catch (IOException e) {
-      System.err.println("Could not load Spanish data file " + dictPath);
+      log.info("Could not load Spanish data file " + dictPath);
+    } finally {
+      IOUtils.closeIgnoringExceptions(br);
     }
+    return dictionary;
   }
 
   @SuppressWarnings("unchecked")
@@ -106,25 +110,22 @@ public final class SpanishVerbStripper implements Serializable {
     new Pair(Pattern.compile("ú"), "u")
   };
 
-  // CONSTRUCTORS
+  // CONSTRUCTOR
 
-  private SpanishVerbStripper() {
-    this(DEFAULT_DICT);
-  }
-
+  /** Access via the singleton-like getInstance() methods. */
   private SpanishVerbStripper(String dictPath) {
-    setupDictionary(dictPath);
+    dict = setupDictionary(dictPath);
   }
 
   /**
-   * Singleton pattern function for getting a default verb stripper
+   * Singleton pattern function for getting a default verb stripper.
    */
   public static SpanishVerbStripper getInstance() {
     return getInstance(DEFAULT_DICT);
   }
 
   /**
-   * Singleton pattern function for getting a verb stripper based on 
+   * Singleton pattern function for getting a verb stripper based on
    * the dictionary at dictPath.
    *
    * @param dictPath the path to the dictionary for this verb stripper.
@@ -142,18 +143,18 @@ public final class SpanishVerbStripper implements Serializable {
    * The verbs in this set have accents in their infinitive forms;
    * don't remove the accents when stripping pronouns!
    */
-  private static final Set<String> accentedInfinitives = new HashSet<String>(Arrays.asList(
-    "desleír",
-    "desoír",
-    "embaír",
-    "engreír",
-    "entreoír",
-    "freír",
-    "oír",
-    "refreír",
-    "reír",
-    "sofreír",
-    "sonreír"
+  private static final Set<String> accentedInfinitives = new HashSet<>(Arrays.asList(
+          "desleír",
+          "desoír",
+          "embaír",
+          "engreír",
+          "entreoír",
+          "freír",
+          "oír",
+          "refreír",
+          "reír",
+          "sofreír",
+          "sonreír"
   ));
 
   // STATIC FUNCTIONS
@@ -162,7 +163,7 @@ public final class SpanishVerbStripper implements Serializable {
    * Determine if the given word is a verb which needs to be stripped.
    */
   public static boolean isStrippable(String word) {
-    return (pStrippable.matcher(word).find() || pIrregulars.matcher(word).find());
+    return pStrippable.matcher(word).find() || pIrregulars.matcher(word).find();
   }
 
   private static String removeAccents(String word) {
@@ -175,11 +176,11 @@ public final class SpanishVerbStripper implements Serializable {
         .replaceAll(accentFix.second());
     return stripped;
   }
-  
+
   /**
    * Determines the case of the letter as if it had been part of the
    * original string
-   * 
+   *
    * @param letter The character whose case must be determined
    * @param original The string we are modelling the case on
    */
@@ -190,6 +191,8 @@ public final class SpanishVerbStripper implements Serializable {
       return Character.toLowerCase(letter);
     }
   }
+
+  private static final Pattern nosse = Pattern.compile("nos|se");
 
   /**
    * Examines the given verb pair and returns <tt>true</tt> if it is a
@@ -205,20 +208,17 @@ public final class SpanishVerbStripper implements Serializable {
     String firstPron = pair.second().get(0).toLowerCase();
 
     String pos = dict.get(stripped);
-    
-    if (pos != null) {
-      if (pos.equals("VMM02P0") && firstPron.equalsIgnoreCase("os")) {
-        // Invalid combination of verb root and pronoun.
-        // (If we combine a second-person plural imperative and the
-        // second person plural object pronoun, we expect to see an
-        // elided verb root, not the normal one that's in the
-        // dictionary.)
-        return false;
-      }
 
-      return true;
+    if (pos != null) {
+      // Check not invalid combination of verb root and pronoun.
+      // (If we combine a second-person plural imperative and the
+      // second person plural object pronoun, we expect to see an
+      // elided verb root, not the normal one that's in the
+      // dictionary.)
+      return ! (pos.equals("VMM02P0") && firstPron.equalsIgnoreCase("os"));
+
     }
-    
+
     // Special case: de-elide elided verb root in the case of a second
     // person plural imperative + second person object pronoun
     //
@@ -232,14 +232,14 @@ public final class SpanishVerbStripper implements Serializable {
     // person plural imperative + object pronoun
     //
     // (vámo, nos) -> (vámos, nos)
-    if (firstPron.matches("nos|se") && dict.containsKey(stripped + 's')) {
+    if (nosse.matcher(firstPron).matches() && dict.containsKey(stripped + 's')) {
       pair.setFirst(pair.first() + getCase(pair.first(), 's'));
       return true;
     }
 
     return false;
   }
-	
+
   /**
    * Separate attached pronouns from the given verb.
    *
@@ -252,15 +252,15 @@ public final class SpanishVerbStripper implements Serializable {
   private static Pair<String, List<String>> stripSuffix(String word,
                                                         Pattern pSuffix) {
     Matcher m = pSuffix.matcher(word);
-    if(m.find()) {
+    if (m.find()) {
       String stripped = word.substring(0, m.start());
       stripped = removeAccents(stripped);
 
-      List<String> attached = new ArrayList<String>();
+      List<String> attached = new ArrayList<>();
       for (int i = 0; i < m.groupCount(); i++)
         attached.add(m.group(i + 1));
 
-      return new Pair<String, List<String>>(stripped, attached);
+      return new Pair<>(stripped, attached);
     }
 
     return null;
@@ -280,13 +280,15 @@ public final class SpanishVerbStripper implements Serializable {
 
     // Try to strip just one pronoun first
     separated = stripSuffix(verb, pOneAttachedPronoun);
-    if (separated != null && validateVerbPair(separated))
+    if (separated != null && validateVerbPair(separated)) {
       return separated;
+    }
 
     // Now two
     separated = stripSuffix(verb, pTwoAttachedPronouns);
-    if (separated != null && validateVerbPair(separated))
+    if (separated != null && validateVerbPair(separated)) {
       return separated;
+    }
 
     return null;
   }
@@ -296,23 +298,25 @@ public final class SpanishVerbStripper implements Serializable {
    * {@link #isStrippable(String)} to determine if a word is a
    * strippable verb.)
    *
-   * Converts e.g.
-   *
-   *   - decírmelo -> decir
-   *   - mudarse -> mudar
-   *   - contándolos -> contando
-   *   - hazlo -> haz
+   * Converts, e.g.,
+   * <ul>
+   *   <li> decírmelo -&gt; decir
+   *   <li> mudarse -&gt; mudar
+   *   <li> contándolos -&gt; contando
+   *   <li> hazlo -&gt; haz
+   * </ul>
    *
    * @return A verb form stripped of attached pronouns, or <tt>null</tt>
    *           if no pronouns were located / stripped.
    */
   public String stripVerb(String verb) {
     Pair<String, List<String>> separated = separatePronouns(verb);
-    if (separated != null)
+    if (separated != null) {
       return separated.first();
-
+    }
     return null;
   }
 
   private static final long serialVersionUID = -4780144226395772354L;
+
 }

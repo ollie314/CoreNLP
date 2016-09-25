@@ -1,4 +1,5 @@
-package edu.stanford.nlp.semgraph.semgrex;
+package edu.stanford.nlp.semgraph.semgrex; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import edu.stanford.nlp.semgraph.SemanticGraph;
 import edu.stanford.nlp.ling.*;
@@ -14,7 +15,10 @@ import java.util.*;
  *
  * @author Chloe Kiddon
  */
-public abstract class SemgrexMatcher {
+public abstract class SemgrexMatcher  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(SemgrexMatcher.class);
 	
   SemanticGraph sg;
   Map<String, IndexedWord> namesToNodes;
@@ -113,36 +117,63 @@ public abstract class SemgrexMatcher {
 
 
   /**
+   * Topological sorting actually takes a rather large amount of time, if you call multiple
+   * patterns on the same tree.
+   * This is a weak cache that stores all the trees sorted since the garbage collector last kicked in.
+   * The key on this map is the identity hash code (i.e., memory address) of the semantic graph; the
+   * value is the sorted list of vertices.
+   *
+   * Note that this optimization will cause strange things to happen if you mutate a semantic graph between
+   * calls to Semgrex.
+   */
+  private static final WeakHashMap<Integer, List<IndexedWord>> topologicalSortCache = new WeakHashMap<>();
+
+  /**
    * Find the next match of the pattern in the graph
    *
    * @return whether there is a match somewhere in the graph
    */
   public boolean find() {
-    // System.err.println("hyp: " + hyp);
+    // log.info("hyp: " + hyp);
     if (findIterator == null) {
       try {
-        if (hyp)
-          findIterator = sg.topologicalSort().iterator();
-        else if (sg_aligned == null)
+        if (hyp) {
+          synchronized (topologicalSortCache) {
+            List<IndexedWord> topoSort = topologicalSortCache.get(System.identityHashCode(sg));
+            if (topoSort == null || topoSort.size() != sg.size()) {  // size check to mitigate a stale cache
+              topoSort = sg.topologicalSort();
+              topologicalSortCache.put(System.identityHashCode(sg), topoSort);
+            }
+            findIterator = topoSort.iterator();
+          }
+        } else if (sg_aligned == null) {
           return false;
-        else
-          findIterator = sg_aligned.topologicalSort().iterator();
-    			
+        } else {
+          synchronized (topologicalSortCache) {
+            List<IndexedWord> topoSort = topologicalSortCache.get(System.identityHashCode(sg_aligned));
+            if (topoSort == null || topoSort.size() != sg_aligned.size()) {  // size check to mitigate a stale cache
+              topoSort = sg_aligned.topologicalSort();
+              topologicalSortCache.put(System.identityHashCode(sg_aligned), topoSort);
+            }
+            findIterator = topoSort.iterator();
+          }
+        }
       } catch (Exception ex) {
-        if (hyp)
+        if (hyp) {
           findIterator = sg.vertexSet().iterator();
-        else if (sg_aligned == null)
+        } else if (sg_aligned == null) {
           return false;
-        else
+        } else {
           findIterator = sg_aligned.vertexSet().iterator();
+        }
       }
     }
   //  System.out.println("first");
     if (findCurrent != null && matches()) {
-    //		System.err.println("find first: " + findCurrent.word());
+    //		log.info("find first: " + findCurrent.word());
       return true;
     }
-    //System.err.println("here");
+    //log.info("here");
     while (findIterator.hasNext()) {
       findCurrent = findIterator.next();
      // System.out.println("final: " + namesToNodes);
@@ -153,7 +184,7 @@ public abstract class SemgrexMatcher {
       //namesToNodes.clear();
       //namesToRelations.clear();
       if (matches()) {
-    	//  System.err.println("find second: " + findCurrent.word());
+    	//  log.info("find second: " + findCurrent.word());
         return true;
       }
     }

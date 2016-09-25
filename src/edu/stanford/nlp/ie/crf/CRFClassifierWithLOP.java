@@ -24,7 +24,8 @@
 //    Support/Questions: java-nlp-user@lists.stanford.edu
 //    Licensing: java-nlp-support@lists.stanford.edu
 
-package edu.stanford.nlp.ie.crf;
+package edu.stanford.nlp.ie.crf; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import edu.stanford.nlp.io.IOUtils;
 import edu.stanford.nlp.math.ArrayMath;
@@ -41,7 +42,10 @@ import java.util.zip.GZIPInputStream;
 
  * @author Mengqiu Wang
  */
-public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> {
+public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN>  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(CRFClassifierWithLOP.class);
 
   List<Set<Integer>> featureIndicesSetArray;
   List<List<Integer>> featureIndicesListArray;
@@ -59,9 +63,7 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
   }
 
   private int[][][][] createPartialDataForLOP(int lopIter, int[][][][] data) {
-    int[] oldFeatures = null;
-    int oldFeatureIndex = -1;
-    ArrayList<Integer> newFeatureList = new ArrayList<Integer>(1000);
+    ArrayList<Integer> newFeatureList = new ArrayList<>(1000);
     Set<Integer> featureIndicesSet = featureIndicesSetArray.get(lopIter);
 
     int[][][][] newData = new int[data.length][][][];
@@ -70,10 +72,9 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
       for (int j = 0; j < data[i].length; j++) {
         newData[i][j] = new int[data[i][j].length][];
         for (int k = 0; k < data[i][j].length; k++) {
-          oldFeatures = data[i][j][k];
+          int[] oldFeatures = data[i][j][k];
           newFeatureList.clear();
-          for (int l = 0; l < oldFeatures.length; l++) {
-            oldFeatureIndex = oldFeatures[l];
+          for (int oldFeatureIndex : oldFeatures) {
             if (featureIndicesSet.contains(oldFeatureIndex)) {
               newFeatureList.add(oldFeatureIndex);
             }
@@ -92,8 +93,8 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
   private void getFeatureBoundaryIndices(int numFeatures, int numLopExpert) {
     // first find begin/end feature index for each expert
     int interval = numFeatures / numLopExpert;
-    featureIndicesSetArray = new ArrayList<Set<Integer>>(numLopExpert);
-    featureIndicesListArray =  new ArrayList<List<Integer>>(numLopExpert);
+    featureIndicesSetArray = new ArrayList<>(numLopExpert);
+    featureIndicesListArray = new ArrayList<>(numLopExpert);
     for (int i = 0; i < numLopExpert; i++) {
       featureIndicesSetArray.add(Generics.<Integer>newHashSet(interval));
       featureIndicesListArray.add(Generics.<Integer>newArrayList(interval));
@@ -132,9 +133,9 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
 
     if (flags.initialLopWeights != null) {
       try {
-        System.err.println("Reading initial LOP weights from file " + flags.initialLopWeights + " ...");
+        log.info("Reading initial LOP weights from file " + flags.initialLopWeights + " ...");
         BufferedReader br = IOUtils.readerFromString(flags.initialLopWeights);
-        List<double[]> listOfWeights = new ArrayList<double[]>(numLopExpert);
+        List<double[]> listOfWeights = new ArrayList<>(numLopExpert);
         for (String line; (line = br.readLine()) != null; ) {
           line = line.trim();
           String[] parts = line.split("\t");
@@ -145,7 +146,7 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
           listOfWeights.add(wArr);
         }
         assert(listOfWeights.size() == numLopExpert);
-        System.err.println("Done!");
+        log.info("Done!");
         for (int i = 0; i < numLopExpert; i++)
           lopExpertWeights[i] = listOfWeights.get(i);
         // DataInputStream dis = new DataInputStream(new BufferedInputStream(new GZIPInputStream(new FileInputStream(
@@ -173,7 +174,7 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
         }
 
         Set<Integer> newSet = Generics.newHashSet(numFeatures);
-        List<Integer> newList = new ArrayList<Integer>(numFeatures);
+        List<Integer> newList = new ArrayList<>(numFeatures);
         for (int fIndex = 0; fIndex < numFeatures; fIndex++) {
           newSet.add(fIndex);
           newList.add(fIndex);
@@ -194,7 +195,7 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
         flags.backpropLopTraining);
     cliquePotentialFunctionHelper = func;
 
-    Minimizer minimizer = getMinimizer(0, evaluators);
+    Minimizer<DiffFunction> minimizer = getMinimizer(0, evaluators);
 
     double[] initialScales;
     //TODO(mengqiu) clean this part up when backpropLogTraining == true
@@ -202,7 +203,7 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
       initialScales = func.initial();
     } else {
       try {
-        System.err.println("Reading initial LOP scales from file " + flags.initialLopScales);
+        log.info("Reading initial LOP scales from file " + flags.initialLopScales);
         DataInputStream dis = new DataInputStream(new BufferedInputStream(new GZIPInputStream(new FileInputStream(
             flags.initialLopScales))));
         initialScales = ConvertByteArray.readDoubleArr(dis);
@@ -214,9 +215,9 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
     double[] learnedParams = minimizer.minimize(func, flags.tolerance, initialScales);
     double[] rawScales = func.separateLopScales(learnedParams);
     double[] lopScales = ArrayMath.softmax(rawScales);
-    System.err.println("After SoftMax Transformation, learned scales are:");
+    log.info("After SoftMax Transformation, learned scales are:");
     for (int lopIter = 0; lopIter < numLopExpert; lopIter++) {
-      System.err.println("lopScales[" + lopIter + "] = " + lopScales[lopIter]);
+      log.info("lopScales[" + lopIter + "] = " + lopScales[lopIter]);
     }
     double[][] learnedLopExpertWeights = lopExpertWeights;
     if (flags.backpropLopTraining) {
@@ -224,4 +225,5 @@ public class CRFClassifierWithLOP<IN extends CoreMap> extends CRFClassifier<IN> 
     }
     return CRFLogConditionalObjectiveFunctionForLOP.combineAndScaleLopWeights(numLopExpert, learnedLopExpertWeights, lopScales);
   }
-} // end class CRFClassifier
+
+} // end class CRFClassifierWithLOP

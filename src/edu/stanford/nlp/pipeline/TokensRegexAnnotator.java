@@ -1,5 +1,6 @@
 package edu.stanford.nlp.pipeline;
 
+import edu.stanford.nlp.ling.CoreAnnotation;
 import edu.stanford.nlp.ling.CoreAnnotations;
 import edu.stanford.nlp.ling.tokensregex.CoreMapExpressionExtractor;
 import edu.stanford.nlp.ling.tokensregex.Env;
@@ -44,7 +45,8 @@ public class TokensRegexAnnotator implements Annotator {
   private final boolean verbose;
 
 
-  static class Options {
+  // Make public so can be accessed and set via reflection
+  public static class Options {
     public Class matchedExpressionsAnnotationKey;
     public boolean setTokenOffsets;
     public boolean extractWithTokens;
@@ -73,7 +75,7 @@ public class TokensRegexAnnotator implements Annotator {
     options.flatten = PropertiesUtils.getBool(props, prefix + "flatten", options.flatten);
     String matchedExpressionsAnnotationKeyName = props.getProperty(prefix + "matchedExpressionsAnnotationKey");
     if (matchedExpressionsAnnotationKeyName != null) {
-      options.matchedExpressionsAnnotationKey = EnvLookup.lookupAnnotationKey(env, matchedExpressionsAnnotationKeyName);
+      options.matchedExpressionsAnnotationKey = EnvLookup.lookupAnnotationKeyWithClassname(env, matchedExpressionsAnnotationKeyName);
       if (options.matchedExpressionsAnnotationKey == null) {
         String propName = prefix + "matchedExpressionsAnnotationKey";
         throw new RuntimeException("Cannot determine annotation key for " + propName + "=" + matchedExpressionsAnnotationKeyName);
@@ -128,7 +130,7 @@ public class TokensRegexAnnotator implements Annotator {
     }
     List<CoreMap> allMatched;
     if (annotation.containsKey(CoreAnnotations.SentencesAnnotation.class)) {
-      allMatched = new ArrayList<CoreMap>();
+      allMatched = new ArrayList<>();
       List<CoreMap> sentences = annotation.get(CoreAnnotations.SentencesAnnotation.class);
       for (CoreMap sentence : sentences) {
         List<CoreMap> matched = extract(sentence);
@@ -153,12 +155,12 @@ public class TokensRegexAnnotator implements Annotator {
   }
 
   @Override
-  public Set<Requirement> requires() {
-    return Collections.singleton(TOKENIZE_REQUIREMENT);
+  public Set<Class<? extends CoreAnnotation>> requires() {
+    return Collections.singleton(CoreAnnotations.TokensAnnotation.class);
   }
 
   @Override
-  public Set<Requirement> requirementsSatisfied() {
+  public Set<Class<? extends CoreAnnotation>> requirementsSatisfied() {
     // TODO: not sure what goes here
     return Collections.emptySet();
   }

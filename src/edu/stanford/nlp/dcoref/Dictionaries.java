@@ -20,6 +20,14 @@ import edu.stanford.nlp.util.Generics;
 import edu.stanford.nlp.util.Pair;
 import edu.stanford.nlp.util.PropertiesUtils;
 
+/** Provides accessors for various grammatical, semantic, and world knowledge
+ *  lexicons and word lists primarily used by the Sieve coreference system,
+ *  but sometimes also drawn on from other code.
+ *
+ *  The source of the dictionaries on Stanford NLP machines is
+ *  /u/nlp/data/coref/gazetteers/dcoref/ . In models jars, they live in
+ *  edu/stanford/nlp/models/dcoref .
+ */
 public class Dictionaries {
 
   public enum MentionType {
@@ -173,8 +181,10 @@ public class Dictionaries {
       "if", "false", "fallacy", "unsuccessfully", "unlikely", "impossible", "improbable", "uncertain", "unsure", "impossibility", "improbability", "cancellation", "breakup", "lack",
       "long-stalled", "end", "rejection", "failure", "avoid", "bar", "block", "break", "cancel", "cease", "cut", "decline", "deny", "deprive", "destroy", "excuse",
       "fail", "forbid", "forestall", "forget", "halt", "lose", "nullify", "prevent", "refrain", "reject", "rebut", "remain", "refuse", "stop", "suspend", "ward"));
-  public final Set<String> neg_relations = Generics.newHashSet(Arrays.asList("prep_without", "prepc_without", "prep_except", "prepc_except", "prep_excluding", "prepx_excluding",
-      "prep_if", "prepc_if", "prep_whether", "prepc_whether", "prep_away_from", "prepc_away_from", "prep_instead_of", "prepc_instead_of"));
+  public final Set<String> neg_relations = Generics.newHashSet(Arrays.asList("nmod:without", "acl:without", "advcl:without",
+      "nmod:except", "acl:except", "advcl:except", "nmod:excluding", "acl:excluding", "advcl:excluding", "nmod:if", "acl:if",
+      "advcl:if", "nmod:whether", "acl:whether", "advcl:whether",  "nmod:away_from", "acl:away_from", "advcl:away_fom",
+      "nmod:instead_of", "acl:instead_of", "advcl:instead_of"));
   public final Set<String> modals = Generics.newHashSet(Arrays.asList("can", "could", "may", "might", "must", "should", "would", "seem",
       "able", "apparently", "necessarily", "presumably", "probably", "possibly", "reportedly", "supposedly",
       "inconceivable", "chance", "impossibility", "improbability", "encouragement", "improbable", "impossible",
@@ -204,8 +214,8 @@ public class Dictionaries {
 
   public final Map<List<String>, Gender> genderNumber = Generics.newHashMap();
 
-  public final ArrayList<Counter<Pair<String, String>>> corefDict = new ArrayList<Counter<Pair<String, String>>>(4);
-  public final Counter<Pair<String, String>> corefDictPMI = new ClassicCounter<Pair<String, String>>();
+  public final ArrayList<Counter<Pair<String, String>>> corefDict = new ArrayList<>(4);
+  public final Counter<Pair<String, String>> corefDictPMI = new ClassicCounter<>();
   public final Map<String,Counter<String>> NE_signatures = Generics.newHashMap();
 
   private void setPronouns() {
@@ -258,7 +268,7 @@ public class Dictionaries {
    *  Lines starting with # are ignored
    *  The file is cased but stored in in-memory data structures uncased.
    *  The results are:
-   *  demonyms is a has from each country (etc.) to a set of demonymic Strings;
+   *  demonyms is a hash from each country (etc.) to a set of demonymic Strings;
    *  adjectiveNation is a set of demonymic Strings;
    *  demonymSet has all country (etc.) names and all demonymic Strings.
    */
@@ -372,18 +382,20 @@ public class Dictionaries {
    * Load Bergsma and Lin (2006) gender and number list.
    * <br>
    * The list is converted from raw text and numbers to a serialized
-   * map, which saves quite a bit of time loading.  
+   * map, which saves quite a bit of time loading.
    * See edu.stanford.nlp.dcoref.util.ConvertGenderFile
    */
   private void loadGenderNumber(String file, String neutralWordsFile) {
     try {
       getWordsFromFile(neutralWordsFile, neutralWords, false);
+    } catch (IOException e) {
+      throw new RuntimeIOException("Couldn't load " + neutralWordsFile);
+    }
+    try {
       Map<List<String>, Gender> temp = IOUtils.readObjectFromURLOrClasspathOrFileSystem(file);
       genderNumber.putAll(temp);
-    } catch (IOException e) {
-      throw new RuntimeIOException(e);
-    } catch (ClassNotFoundException e) {
-      throw new RuntimeIOException(e);
+    } catch (IOException | ClassNotFoundException e) {
+      throw new RuntimeIOException("Couldn't load " + file);
     }
   }
 
@@ -391,7 +403,7 @@ public class Dictionaries {
       ArrayList<Counter<Pair<String, String>>> dict) {
 
     for(int i = 0; i < 4; i++){
-      dict.add(new ClassicCounter<Pair<String, String>>());
+      dict.add(new ClassicCounter<>());
 
       BufferedReader reader = null;
       try {
@@ -401,7 +413,7 @@ public class Dictionaries {
 
         while(reader.ready()) {
           String[] split = reader.readLine().split("\t");
-          dict.get(i).setCount(new Pair<String, String>(split[0], split[1]), Double.parseDouble(split[2]));
+          dict.get(i).setCount(new Pair<>(split[0], split[1]), Double.parseDouble(split[2]));
         }
 
       } catch (IOException e) {
@@ -422,7 +434,7 @@ public class Dictionaries {
 
         while(reader.ready()) {
           String[] split = reader.readLine().split("\t");
-          dict.setCount(new Pair<String, String>(split[0], split[1]), Double.parseDouble(split[3]));
+          dict.setCount(new Pair<>(split[0], split[1]), Double.parseDouble(split[3]));
         }
 
       } catch (IOException e) {
@@ -439,7 +451,7 @@ public class Dictionaries {
 
       while(reader.ready()) {
         String[] split = reader.readLine().split("\t");
-        Counter<String> cntr = new ClassicCounter<String>();
+        Counter<String> cntr = new ClassicCounter<>();
         sigs.put(split[0], cntr);
         for (int i = 1; i < split.length; i=i+2) {
           cntr.setCount(split[i], Double.parseDouble(split[i+1]));

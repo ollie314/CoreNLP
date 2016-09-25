@@ -1,4 +1,5 @@
-package edu.stanford.nlp.sequences;
+package edu.stanford.nlp.sequences; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import edu.stanford.nlp.ling.CoreAnnotations;
 import edu.stanford.nlp.ling.CoreLabel;
@@ -21,6 +22,7 @@ import java.util.regex.*;
 /**
  * This class provides methods for reading plain text documents and writing out
  * those documents once classified in several different formats.
+ * The output formats are named: slashTags, xml, inlineXML, tsv, tabbedEntities.
  * <p>
  * <i>Implementation note:</i> see
  * itest/src/edu/stanford/nlp/ie/crf/CRFClassifierITest.java for examples and
@@ -33,7 +35,10 @@ import java.util.regex.*;
  * @author Christopher Manning (new output options organization)
  * @author Sonal Gupta (made the class generic)
  */
-public class PlainTextDocumentReaderAndWriter<IN extends CoreMap> implements DocumentReaderAndWriter<IN> {
+public class PlainTextDocumentReaderAndWriter<IN extends CoreMap> implements DocumentReaderAndWriter<IN>  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(PlainTextDocumentReaderAndWriter.class);
 
   private static final long serialVersionUID = -2420535144980273136L;
 
@@ -76,7 +81,8 @@ public class PlainTextDocumentReaderAndWriter<IN extends CoreMap> implements Doc
   } // end enum Output style
 
   private static final Pattern sgml = Pattern.compile("<[^>]*>");
-  private final WordToSentenceProcessor<IN> wts = new WordToSentenceProcessor<IN>(WordToSentenceProcessor.NewlineIsSentenceBreak.ALWAYS);
+  private final WordToSentenceProcessor<IN> wts =
+          new WordToSentenceProcessor<>(WordToSentenceProcessor.NewlineIsSentenceBreak.ALWAYS);
 
   private SeqClassifierFlags flags; // = null;
   private TokenizerFactory<IN> tokenizerFactory;
@@ -119,7 +125,7 @@ public class PlainTextDocumentReaderAndWriter<IN extends CoreMap> implements Doc
   public Iterator<List<IN>> getIterator(Reader r) {
     Tokenizer<IN> tokenizer = tokenizerFactory.getTokenizer(r);
     // PTBTokenizer.newPTBTokenizer(r, false, true);
-    List<IN> words = new ArrayList<IN>();
+    List<IN> words = new ArrayList<>();
     IN previous = null;
     StringBuilder prepend = new StringBuilder();
 
@@ -327,7 +333,13 @@ public class PlainTextDocumentReaderAndWriter<IN extends CoreMap> implements Doc
         lastEntityType = entityType;
       }
     }
-    out.println(); // finish line then add blank line
+    // if we're in the middle of printing an entity, then we should print its type
+    if (lastEntityType != null && ! background.equals(lastEntityType)) {
+      out.print('\t');
+      out.print(lastEntityType);
+    }
+    // finish line then add blank line
+    out.println();
     out.println();
   }
 
@@ -361,7 +373,13 @@ public class PlainTextDocumentReaderAndWriter<IN extends CoreMap> implements Doc
         lastEntityType = entityType;
       }
     }
-    out.println(); // finish line then add blank line
+    // if we're in the middle of printing an entity, then we should print its type
+    if (lastEntityType != null && ! background.equals(lastEntityType)) {
+      out.print('\t');
+      out.print(lastEntityType);
+    }
+    // finish line then add blank line
+    out.println();
     out.println();
   }
 
@@ -539,7 +557,7 @@ public class PlainTextDocumentReaderAndWriter<IN extends CoreMap> implements Doc
  * prevTags.length() > 0) { w.set(PrevSGMLAnnotation.class, prevTags); } first =
  * false; lastWord = w; document.add(w); } documents.add(document); } else {
  * //String tag = ((Word) o).word(); IN word = (IN) o; String tag =
- * word.before() + word.current(); if (first) { System.err.println(word);
+ * word.before() + word.current(); if (first) { log.info(word);
  * prevTags = tag; } else { String t =
  * lastWord.getString(AfterSGMLAnnotation.class); tag = t + tag;
  * lastWord.set(AfterSGMLAnnotation.class, tag); } } }
@@ -550,7 +568,7 @@ public class PlainTextDocumentReaderAndWriter<IN extends CoreMap> implements Doc
  * allWords.addAll(doc); }
  *
  * List<List<IN>> documentsFinal = wts.process(allWords);
- * System.err.println(documentsFinal.get(0).get(0)); System.exit(0);
+ * log.info(documentsFinal.get(0).get(0)); System.exit(0);
  *
  * return documentsFinal.iterator(); // return documents.iterator(); }
  *

@@ -1,6 +1,6 @@
 package edu.stanford.nlp.parser.nndep;
 
-import edu.stanford.nlp.international.Languages;
+import edu.stanford.nlp.international.Language;
 import edu.stanford.nlp.ling.HasWord;
 import edu.stanford.nlp.tagger.maxent.MaxentTagger;
 import edu.stanford.nlp.trees.TreebankLanguagePack;
@@ -20,11 +20,11 @@ import java.util.function.Function;
  * @author Danqi Chen
  * @author Jon Gauthier
  */
-public class Config
-{
+public class Config {
+
   /**
-  *   Out-of-vocabulary token string.
-  */
+   *   Out-of-vocabulary token string.
+   */
   public static final String UNKNOWN = "-UNKNOWN-";
 
    /**
@@ -50,7 +50,7 @@ public class Config
   /**
    * The language being parsed.
    */
-  public Languages.Language language = Languages.Language.English;
+  public Language language = Language.UniversalEnglish;
 
   /**
    * Number of threads to use during training. Also indirectly controls
@@ -153,6 +153,28 @@ public class Config
    */
   public boolean saveIntermediate = true;
 
+
+  /**
+   * Train a labeled parser if labeled = true, and a unlabeled one otherwise.
+   */
+  public boolean unlabeled = false;
+
+  /**
+   * Use coarse POS instead of fine-grained POS if cPOS = true.
+   */
+  public boolean cPOS = false;
+
+  /**
+  *  Exclude punctuations in evaluation if noPunc = true.
+  */
+  public boolean noPunc = true;
+
+  /**
+  *  Update word embeddings when performing gradient descent.
+  *  Set to false if you provide embeddings and do not want to finetune.
+  */
+  public boolean doWordEmbeddingGradUpdate = true;
+
   /**
    * Describes language-specific properties necessary for training and
    * testing. By default,
@@ -206,6 +228,10 @@ public class Config
     evalPerIter = PropertiesUtils.getInt(props, "evalPerIter", evalPerIter);
     clearGradientsPerIter = PropertiesUtils.getInt(props, "clearGradientsPerIter", clearGradientsPerIter);
     saveIntermediate = PropertiesUtils.getBool(props, "saveIntermediate", saveIntermediate);
+    unlabeled = PropertiesUtils.getBool(props, "unlabeled", unlabeled);
+    cPOS = PropertiesUtils.getBool(props, "cPOS", cPOS);
+    noPunc = PropertiesUtils.getBool(props, "noPunc", noPunc);
+    doWordEmbeddingGradUpdate = PropertiesUtils.getBool(props, "doWordEmbeddingGradUpdate", doWordEmbeddingGradUpdate);
 
     // Runtime parsing options
     sentenceDelimiter = PropertiesUtils.getString(props, "sentenceDelimiter", sentenceDelimiter);
@@ -218,22 +244,21 @@ public class Config
     language = props.containsKey("language")
                ? getLanguage(props.getProperty("language"))
                : language;
-    tlp = Languages.getLanguageParams(language).treebankLanguagePack();
+    tlp = language.params.treebankLanguagePack();
   }
 
   /**
-   * Get the {@link edu.stanford.nlp.international.Languages.Language}
+   * Get the {@link edu.stanford.nlp.international.Language}
    * object corresponding to the given language string.
    *
-   * @return A {@link edu.stanford.nlp.international.Languages.Language}
+   * @return A {@link edu.stanford.nlp.international.Language}
    *         or {@code null} if no instance matches the given string.
    */
-  private Languages.Language getLanguage(String languageStr) {
-    for (Languages.Language l : Languages.Language.values()) {
+  private static Language getLanguage(String languageStr) {
+    for (Language l : Language.values()) {
       if (l.name().equalsIgnoreCase(languageStr))
         return l;
     }
-
     return null;
   }
 
@@ -254,5 +279,10 @@ public class Config
     System.err.printf("evalPerIter = %d%n", evalPerIter);
     System.err.printf("clearGradientsPerIter = %d%n", clearGradientsPerIter);
     System.err.printf("saveItermediate = %b%n", saveIntermediate);
+    System.err.printf("unlabeled = %b%n", unlabeled);
+    System.err.printf("cPOS = %b%n", cPOS);
+    System.err.printf("noPunc = %b%n", noPunc);
+    System.err.printf("doWordEmbeddingGradUpdate = %b%n", doWordEmbeddingGradUpdate);
   }
+
 }

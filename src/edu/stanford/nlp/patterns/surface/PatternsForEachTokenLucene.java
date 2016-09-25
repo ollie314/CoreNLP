@@ -1,8 +1,9 @@
 package edu.stanford.nlp.patterns.surface;
 
 import edu.stanford.nlp.io.IOUtils;
-import edu.stanford.nlp.util.Execution;
-import edu.stanford.nlp.util.Execution.Option;
+import edu.stanford.nlp.patterns.Pattern;
+import edu.stanford.nlp.util.ArgumentParser;
+import edu.stanford.nlp.util.ArgumentParser.Option;
 import edu.stanford.nlp.util.LuceneFieldType;
 import edu.stanford.nlp.util.logging.Redwood;
 import org.apache.lucene.analysis.Analyzer;
@@ -19,8 +20,6 @@ import org.apache.lucene.util.Version;
 
 import java.io.*;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -48,7 +47,7 @@ public class PatternsForEachTokenLucene<E extends Pattern> extends PatternsForEa
   boolean createPatLuceneIndex;
 
   public PatternsForEachTokenLucene(Properties props, Map<String, Map<Integer, Set<E>>> pats){
-    Execution.fillOptions(this, props);
+    ArgumentParser.fillOptions(this, props);
 
     if(allPatternsDir == null){
 
@@ -307,7 +306,7 @@ public class PatternsForEachTokenLucene<E extends Pattern> extends PatternsForEa
   public Map<String, Map<Integer, Set<E>>> getPatternsForAllTokens(Collection<String> sentIds) {
     close();
     setIndexReaderSearcher();
-    Map<String, Map<Integer, Set<E>>> pats = new HashMap<String, Map<Integer, Set<E>>>();
+    Map<String, Map<Integer, Set<E>>> pats = new HashMap<>();
     for(String s: sentIds){
       pats.put(s, getPatternsForAllTokens(s));
     }

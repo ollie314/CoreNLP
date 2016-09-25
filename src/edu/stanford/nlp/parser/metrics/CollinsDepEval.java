@@ -1,4 +1,5 @@
-package edu.stanford.nlp.parser.metrics;
+package edu.stanford.nlp.parser.metrics; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.File;
 import java.io.PrintWriter;
@@ -11,8 +12,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 
-import edu.stanford.nlp.international.Languages;
-import edu.stanford.nlp.international.Languages.Language;
+import edu.stanford.nlp.international.Language;
 import edu.stanford.nlp.parser.lexparser.TreebankLangParserParams;
 import edu.stanford.nlp.stats.ClassicCounter;
 import edu.stanford.nlp.stats.Counter;
@@ -32,7 +32,10 @@ import edu.stanford.nlp.util.StringUtils;
  * @author Spence Green
  *
  */
-public class CollinsDepEval extends AbstractEval {
+public class CollinsDepEval extends AbstractEval  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(CollinsDepEval.class);
 
   private static final boolean DEBUG = false;
 
@@ -54,19 +57,19 @@ public class CollinsDepEval extends AbstractEval {
     this.hf = hf;
     this.startSymbol = startSymbol;
 
-    precisions = new ClassicCounter<CollinsRelation>();
-    recalls = new ClassicCounter<CollinsRelation>();
-    f1s = new ClassicCounter<CollinsRelation>();
+    precisions = new ClassicCounter<>();
+    recalls = new ClassicCounter<>();
+    f1s = new ClassicCounter<>();
 
-    precisions2 = new ClassicCounter<CollinsRelation>();
-    recalls2 = new ClassicCounter<CollinsRelation>();
-    pnums2 = new ClassicCounter<CollinsRelation>();
-    rnums2 = new ClassicCounter<CollinsRelation>();
+    precisions2 = new ClassicCounter<>();
+    recalls2 = new ClassicCounter<>();
+    pnums2 = new ClassicCounter<>();
+    rnums2 = new ClassicCounter<>();
   }
 
   @Override
   protected Set<?> makeObjects(Tree tree) {
-    System.err.println(this.getClass().getName() + ": Function makeObjects() not implemented");
+    log.info(this.getClass().getName() + ": Function makeObjects() not implemented");
     return null;
   }
 
@@ -148,7 +151,7 @@ public class CollinsDepEval extends AbstractEval {
     cats.addAll(precisions.keySet());
     cats.addAll(recalls.keySet());
 
-    Map<Double,CollinsRelation> f1Map = new TreeMap<Double,CollinsRelation>();
+    Map<Double,CollinsRelation> f1Map = new TreeMap<>();
     for (CollinsRelation cat : cats) {
       double pnum2 = pnums2.getCount(cat);
       double rnum2 = rnums2.getCount(cat);
@@ -188,7 +191,7 @@ public class CollinsDepEval extends AbstractEval {
     usage.append(String.format("Usage: java %s [OPTS] goldFile guessFile%n%n",CollinsDepEval.class.getName()));
     usage.append("Options:").append(nl);
     usage.append("  -v        : Verbose output").append(nl);
-    usage.append("  -l lang   : Language name " + Languages.listOfLanguages()).append(nl);
+    usage.append("  -l lang   : Language name " + Language.langList).append(nl);
     usage.append("  -y num    : Max yield of gold trees").append(nl);
     usage.append("  -g num    : Max yield of guess trees").append(nl);
     return usage.toString();
@@ -208,7 +211,7 @@ public class CollinsDepEval extends AbstractEval {
    */
   public static void main(String[] args) {
     if(args.length < MIN_ARGS) {
-      System.err.println(usage());
+      log.info(usage());
       System.exit(-1);
     }
     Properties options = StringUtils.argsToProperties(args, optionArgDefs());
@@ -220,13 +223,13 @@ public class CollinsDepEval extends AbstractEval {
     
     String[] parsedArgs = options.getProperty("","").split("\\s+");
     if (parsedArgs.length != MIN_ARGS) {
-      System.err.println(usage());
+      log.info(usage());
       System.exit(-1);
     }
     File goldFile = new File(parsedArgs[0]);
     File guessFile = new File(parsedArgs[1]);
-    
-    final TreebankLangParserParams tlpp = Languages.getLanguageParams(LANGUAGE);
+
+    final TreebankLangParserParams tlpp = LANGUAGE.params;
     final PrintWriter pwOut = tlpp.pw();
 
     final Treebank guessTreebank = tlpp.diskTreebank();

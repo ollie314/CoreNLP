@@ -25,17 +25,13 @@
 //    http://nlp.stanford.edu/software/srparser.shtml
 
 package edu.stanford.nlp.parser.shiftreduce;
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.FileFilter;
 import java.io.IOException;
 import java.io.Serializable;
-import java.text.DecimalFormat;
-import java.text.NumberFormat;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.Set;
 
@@ -48,7 +44,6 @@ import edu.stanford.nlp.ling.Label;
 import edu.stanford.nlp.ling.TaggedWord;
 import edu.stanford.nlp.ling.Word;
 import edu.stanford.nlp.parser.common.ArgUtils;
-import edu.stanford.nlp.parser.common.ParserConstraint;
 import edu.stanford.nlp.parser.common.ParserGrammar;
 import edu.stanford.nlp.parser.common.ParserQuery;
 import edu.stanford.nlp.parser.common.ParserUtils;
@@ -70,14 +65,11 @@ import edu.stanford.nlp.trees.TreebankLanguagePack;
 import edu.stanford.nlp.trees.TreeCoreAnnotations;
 import edu.stanford.nlp.trees.Trees;
 import edu.stanford.nlp.util.ArrayUtils;
-import edu.stanford.nlp.util.ErasureUtils;
 import edu.stanford.nlp.util.Generics;
 import edu.stanford.nlp.util.HashIndex;
 import edu.stanford.nlp.util.Index;
 import edu.stanford.nlp.util.Pair;
 import edu.stanford.nlp.util.ReflectionLoading;
-import edu.stanford.nlp.util.ScoredComparator;
-import edu.stanford.nlp.util.ScoredObject;
 import edu.stanford.nlp.util.StringUtils;
 import edu.stanford.nlp.util.Timing;
 import edu.stanford.nlp.util.concurrent.MulticoreWrapper;
@@ -85,12 +77,16 @@ import edu.stanford.nlp.util.concurrent.ThreadsafeProcessor;
 
 
 /**
+ * A shift-reduce constituency parser.
  * Overview and description available at
  * http://nlp.stanford.edu/software/srparser.shtml
  *
  * @author John Bauer
  */
-public class ShiftReduceParser extends ParserGrammar implements Serializable {
+public class ShiftReduceParser extends ParserGrammar implements Serializable  {
+
+  /** A logger for this class */
+  private static final Redwood.RedwoodChannels log = Redwood.channels(ShiftReduceParser.class);
 
   final ShiftReduceOptions op;
 
@@ -138,7 +134,7 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
     return getTLPParams().treebankLanguagePack();
   }
 
-  private final static String[] BEAM_FLAGS = { "-beamSize", "4" };
+  private static final String[] BEAM_FLAGS = { "-beamSize", "4" };
 
   @Override
   public String[] defaultCoreNLPFlags() {
@@ -149,6 +145,18 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
       // this model, such as -retainTmpSubcategories
       return getTLPParams().defaultCoreNLPFlags();
     }
+  }
+
+  /**
+   * Return an unmodifiableSet containing the known states (including binarization)
+   */
+  public Set<String> knownStates() {
+    return Collections.unmodifiableSet(model.knownStates);
+  }
+
+  /** Return the Set of POS tags used in the model. */
+  public Set<String> tagSet() {
+    return model.tagSet();
   }
 
   @Override
@@ -166,7 +174,7 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
     if (!getOp().testOptions.preTag) {
       throw new UnsupportedOperationException("Can only parse raw text if a tagger is specified, as the ShiftReduceParser cannot produce its own tags");
     }
-    return super.parse(sentence);    
+    return super.parse(sentence);
   }
 
   @Override
@@ -214,7 +222,6 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
       if (hw instanceof CoreLabel) {
         wordLabel = (CoreLabel) hw;
         tag = wordLabel.tag();
-        CoreLabel cl = (CoreLabel) hw;
       } else {
         wordLabel = new CoreLabel();
         wordLabel.setValue(hw.word());
@@ -261,24 +268,24 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
     op.setOptions(args);
 
     if (op.trainOptions.randomSeed == 0) {
-      op.trainOptions.randomSeed = (new Random()).nextLong();
-      System.err.println("Random seed not set by options, using " + op.trainOptions.randomSeed);
+      op.trainOptions.randomSeed = System.nanoTime();
+      log.info("Random seed not set by options, using " + op.trainOptions.randomSeed);
     }
     return op;
   }
 
   public Treebank readTreebank(String treebankPath, FileFilter treebankFilter) {
-    System.err.println("Loading trees from " + treebankPath);
+    log.info("Loading trees from " + treebankPath);
     Treebank treebank = op.tlpParams.memoryTreebank();
     treebank.loadPath(treebankPath, treebankFilter);
-    System.err.println("Read in " + treebank.size() + " trees from " + treebankPath);
+    log.info("Read in " + treebank.size() + " trees from " + treebankPath);
     return treebank;
   }
 
   public List<Tree> readBinarizedTreebank(String treebankPath, FileFilter treebankFilter) {
     Treebank treebank = readTreebank(treebankPath, treebankFilter);
     List<Tree> binarized = binarizeTreebank(treebank, op);
-    System.err.println("Converted trees to binarized format");
+    log.info("Converted trees to binarized format");
     return binarized;
   }
 
@@ -346,11 +353,13 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
       this.tagger = tagger;
     }
 
+    @Override
     public Tree process(Tree tree) {
       redoTags(tree, tagger);
       return tree;
     }
 
+    @Override
     public RetagProcessor newInstance() {
       // already threadsafe
       return this;
@@ -363,7 +372,7 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
         redoTags(tree, tagger);
       }
     } else {
-      MulticoreWrapper<Tree, Tree> wrapper = new MulticoreWrapper<Tree, Tree>(nThreads, new RetagProcessor(tagger));
+      MulticoreWrapper<Tree, Tree> wrapper = new MulticoreWrapper<>(nThreads, new RetagProcessor(tagger));
       for (Tree tree : trees) {
         wrapper.put(tree);
       }
@@ -410,7 +419,7 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
   private void train(List<Pair<String, FileFilter>> trainTreebankPath,
                      Pair<String, FileFilter> devTreebankPath,
                      String serializedPath) {
-    System.err.println("Training method: " + op.trainOptions().trainingMethod);
+    log.info("Training method: " + op.trainOptions().trainingMethod);
 
     List<Tree> binarizedTrees = Generics.newArrayList();
     for (Pair<String, FileFilter> treebank : trainTreebankPath) {
@@ -432,18 +441,18 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
     Set<String> rootStates = findRootStates(binarizedTrees);
     Set<String> rootOnlyStates = findRootOnlyStates(binarizedTrees, rootStates);
 
-    System.err.println("Known states: " + knownStates);
-    System.err.println("States which occur at the root: " + rootStates);
-    System.err.println("States which only occur at the root: " + rootStates);
+    log.info("Known states: " + knownStates);
+    log.info("States which occur at the root: " + rootStates);
+    log.info("States which only occur at the root: " + rootStates);
 
     Timing transitionTimer = new Timing();
     List<List<Transition>> transitionLists = CreateTransitionSequence.createTransitionSequences(binarizedTrees, op.compoundUnaries, rootStates, rootOnlyStates);
-    Index<Transition> transitionIndex = new HashIndex<Transition>();
+    Index<Transition> transitionIndex = new HashIndex<>();
     for (List<Transition> transitions : transitionLists) {
       transitionIndex.addAll(transitions);
     }
     transitionTimer.done("Converting trees into transition lists");
-    System.err.println("Number of transitions: " + transitionIndex.size());
+    log.info("Number of transitions: " + transitionIndex.size());
 
     Random random = new Random(op.trainOptions.randomSeed);
 
@@ -457,22 +466,14 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
     this.model = newModel;
   }
 
+  @Override
   public void setOptionFlags(String ... flags) {
     op.setOptions(flags);
   }
 
   public static ShiftReduceParser loadModel(String path, String ... extraFlags) {
-    ShiftReduceParser parser = null;
-    try {
-      Timing timing = new Timing();
-      System.err.print("Loading parser from serialized file " + path + " ...");
-      parser = IOUtils.readObjectFromURLOrClasspathOrFileSystem(path);
-      timing.done();
-    } catch (IOException e) {
-      throw new RuntimeIOException(e);
-    } catch (ClassNotFoundException e) {
-      throw new RuntimeIOException(e);
-    }
+    ShiftReduceParser parser = IOUtils.readObjectAnnouncingTimingFromURLOrClasspathOrFileSystem(
+            log, "Loading parser from serialized file", path);
     if (extraFlags.length > 0) {
       parser.setOptionFlags(extraFlags);
     }
@@ -540,9 +541,9 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
     ShiftReduceParser parser = null;
 
     if (trainTreebankPath != null) {
-      System.err.println("Training ShiftReduceParser");
-      System.err.println("Initial arguments:");
-      System.err.println("   " + StringUtils.join(args));
+      log.info("Training ShiftReduceParser");
+      log.info("Initial arguments:");
+      log.info("   " + StringUtils.join(args));
       if (continueTraining != null) {
         parser = ShiftReduceParser.loadModel(continueTraining, ArrayUtils.concatenate(FORCE_TAGS, newArgs));
       } else {
@@ -560,22 +561,23 @@ public class ShiftReduceParser extends ParserGrammar implements Serializable {
     //parser.outputStats();
 
     if (testTreebankPath != null) {
-      System.err.println("Loading test trees from " + testTreebankPath.first());
+      log.info("Loading test trees from " + testTreebankPath.first());
       Treebank testTreebank = parser.op.tlpParams.memoryTreebank();
       testTreebank.loadPath(testTreebankPath.first(), testTreebankPath.second());
-      System.err.println("Loaded " + testTreebank.size() + " trees");
+      log.info("Loaded " + testTreebank.size() + " trees");
 
       EvaluateTreebank evaluator = new EvaluateTreebank(parser.op, null, parser);
       evaluator.testOnTreebank(testTreebank);
 
-      // System.err.println("Input tree: " + tree);
-      // System.err.println("Debinarized tree: " + query.getBestParse());
-      // System.err.println("Parsed binarized tree: " + query.getBestBinarizedParse());
-      // System.err.println("Predicted transition sequence: " + query.getBestTransitionSequence());
+      // log.info("Input tree: " + tree);
+      // log.info("Debinarized tree: " + query.getBestParse());
+      // log.info("Parsed binarized tree: " + query.getBestBinarizedParse());
+      // log.info("Predicted transition sequence: " + query.getBestTransitionSequence());
     }
   }
 
 
   private static final long serialVersionUID = 1;
+
 }
 

@@ -1,14 +1,14 @@
-package edu.stanford.nlp.parser.tools;
+package edu.stanford.nlp.parser.tools; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.PrintWriter;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-import edu.stanford.nlp.international.Languages;
-import edu.stanford.nlp.international.Languages.Language;
+import edu.stanford.nlp.international.Language;
 import edu.stanford.nlp.ling.CoreLabel;
-import edu.stanford.nlp.ling.Sentence;
+import edu.stanford.nlp.ling.SentenceUtils;
 import edu.stanford.nlp.parser.lexparser.TreebankLangParserParams;
 import edu.stanford.nlp.trees.DiskTreebank;
 import edu.stanford.nlp.trees.Tree;
@@ -24,7 +24,10 @@ import edu.stanford.nlp.util.StringUtils;
  * @author Spence Green
  *
  */
-public class CountTrees {
+public class CountTrees  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(CountTrees.class);
 
   private static final int minArgs = 1;
   private static final String usage;
@@ -33,7 +36,7 @@ public class CountTrees {
     String nl = System.getProperty("line.separator");
     sb.append(String.format("Usage: java %s [OPTS] tree_file%s%s",CountTrees.class.getName(),nl,nl));
     sb.append("Options:\n");
-    sb.append("  -l lang    : Select language settings from " + Languages.listOfLanguages()).append(nl);
+    sb.append("  -l lang    : Select language settings from " + Language.langList).append(nl);
     sb.append("  -e enc     : Encoding.").append(nl);
     sb.append("  -y len     : Only print trees with yields <= len.").append(nl);
     sb.append("  -a         : Only print the pre-terminal yields, one per line.").append(nl);
@@ -73,7 +76,7 @@ public class CountTrees {
     boolean printPOS = PropertiesUtils.getBool(options, "a", false);
     boolean printTnT = PropertiesUtils.getBool(options, "t", false);
     Language language = PropertiesUtils.get(options, "l", Language.English, Language.class);
-    TreebankLangParserParams tlpp = Languages.getLanguageParams(language);
+    TreebankLangParserParams tlpp = language.params;
     String encoding = options.getProperty("e", "UTF-8");
     tlpp.setInputEncoding(encoding);
     tlpp.setOutputEncoding(encoding);
@@ -91,10 +94,10 @@ public class CountTrees {
         pw.println(tree.toString());
         
       } else if (flattenTrees) {
-        pw.println(Sentence.listToString(tree.yield()));
+        pw.println(SentenceUtils.listToString(tree.yield()));
         
       } else if (printPOS) {
-        pw.println(Sentence.listToString(tree.preTerminalYield()));
+        pw.println(SentenceUtils.listToString(tree.preTerminalYield()));
       
       } else if (printTnT) {
         List<CoreLabel> yield = tree.taggedLabeledYield();

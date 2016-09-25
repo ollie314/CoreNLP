@@ -1,4 +1,5 @@
-package edu.stanford.nlp.parser.metrics;
+package edu.stanford.nlp.parser.metrics; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.PrintWriter;
 import java.util.Iterator;
@@ -6,10 +7,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import edu.stanford.nlp.international.Languages;
-import edu.stanford.nlp.international.Languages.Language;
+import edu.stanford.nlp.international.Language;
 import edu.stanford.nlp.ling.Label;
-import edu.stanford.nlp.ling.Sentence;
+import edu.stanford.nlp.ling.SentenceUtils;
 import edu.stanford.nlp.parser.lexparser.EnglishTreebankParserParams;
 import edu.stanford.nlp.parser.lexparser.TreebankLangParserParams;
 import edu.stanford.nlp.trees.Dependency;
@@ -32,7 +32,10 @@ import edu.stanford.nlp.util.StringUtils;
  *  @author Spence Green
  *
  */
-public class UnlabeledAttachmentEval extends AbstractEval {
+public class UnlabeledAttachmentEval extends AbstractEval  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(UnlabeledAttachmentEval.class);
 
   private final HeadFinder headFinder;
 
@@ -71,9 +74,9 @@ public class UnlabeledAttachmentEval extends AbstractEval {
       return;
 
     } else if (guess.yield().size() != gold.yield().size()) {
-      System.err.println("Warning: yield differs:");
-      System.err.println("Guess: " + Sentence.listToString(guess.yield()));
-      System.err.println("Gold:  " + Sentence.listToString(gold.yield()));
+      log.info("Warning: yield differs:");
+      log.info("Guess: " + SentenceUtils.listToString(guess.yield()));
+      log.info("Gold:  " + SentenceUtils.listToString(gold.yield()));
     }
 
     super.evaluate(guess, gold, pw);
@@ -86,7 +89,7 @@ public class UnlabeledAttachmentEval extends AbstractEval {
   @Override
   protected Set<?> makeObjects(Tree tree) {
     if (tree == null) {
-      System.err.println("Warning: null tree");
+      log.info("Warning: null tree");
       return Generics.newHashSet();
     }
     if (headFinder != null) {
@@ -103,7 +106,7 @@ public class UnlabeledAttachmentEval extends AbstractEval {
     usage.append(String.format("Usage: java %s [OPTS] gold guess\n\n", UnlabeledAttachmentEval.class.getName()));
     usage.append("Options:\n");
     usage.append("  -v         : Verbose mode.\n");
-    usage.append("  -l lang    : Select language settings from ").append(Languages.listOfLanguages()).append('\n');
+    usage.append("  -l lang    : Select language settings from ").append(Language.langList).append('\n');
     usage.append("  -y num     : Skip gold trees with yields longer than num.\n");
     usage.append("  -e         : Input encoding.\n");
   }
@@ -136,7 +139,7 @@ public class UnlabeledAttachmentEval extends AbstractEval {
       if(opt.getKey() == null) continue;
       if(opt.getKey().equals("-l")) {
         Language lang = Language.valueOf(opt.getValue()[0].trim());
-        tlpp = Languages.getLanguageParams(lang);
+        tlpp = lang.params;
 
       } else if(opt.getKey().equals("-y")) {
         maxGoldYield = Integer.parseInt(opt.getValue()[0].trim());
@@ -148,14 +151,14 @@ public class UnlabeledAttachmentEval extends AbstractEval {
         encoding = opt.getValue()[0];
 
       } else {
-        System.err.println(usage.toString());
+        log.info(usage.toString());
         System.exit(-1);
       }
 
       //Non-option arguments located at key null
       String[] rest = argsMap.get(null);
       if(rest == null || rest.length < minArgs) {
-        System.err.println(usage.toString());
+        log.info(usage.toString());
         System.exit(-1);
       }
       goldFile = rest[0];

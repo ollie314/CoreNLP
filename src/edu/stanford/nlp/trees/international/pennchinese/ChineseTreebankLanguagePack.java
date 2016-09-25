@@ -2,14 +2,16 @@ package edu.stanford.nlp.trees.international.pennchinese;
 
 import edu.stanford.nlp.process.TokenizerFactory;
 import edu.stanford.nlp.trees.*;
+
 import java.util.function.Predicate;
+
 import edu.stanford.nlp.util.Filters;
 import edu.stanford.nlp.ling.HasWord;
 
 
 /**
- * Language pack for the UPenn/Colorado Chinese treebank.
- * The native character set for the Chinese Treebank is GB18030.
+ * Language pack for the UPenn/Colorado/Brandeis Chinese treebank.
+ * The native character set for the Chinese Treebank was GB18030, but later became UTF-8.
  * This file (like the rest of JavaNLP) is in UTF-8.
  *
  * @author Roger Levy
@@ -77,6 +79,8 @@ public class ChineseTreebankLanguagePack extends AbstractTreebankLanguagePack {
   /**
    * Accepts a String that is a sentence end
    * punctuation tag, and rejects everything else.
+   * TODO FIXME: this is testing whether it is a sentence final word,
+   * not a sentence final tag.
    *
    * @return Whether this is a sentence final punctuation tag
    */
@@ -196,8 +200,8 @@ public class ChineseTreebankLanguagePack extends AbstractTreebankLanguagePack {
   private static final String[] parenthesis = {"（", "）", "［", "］", "｛", "｝", "-LRB-", "-RRB-", "【", "】",
           "〔", "〖", "〘", "〚", "｟", "〕", "〗", "〙", "〛", "｠" };  // ( and ) still must be escaped
   private static final String[] colon = {"：", "；", "∶", ":"};
-  private static final String[] dash = {"…", "―", "——", "———", "————", "—", "——", "———", 
-          "－", "--", "---", "－－", "－－－", "－－－－", "－－－－－", "－－－－－－", 
+  private static final String[] dash = {"…", "―", "——", "———", "————", "—", "——", "———",
+          "－", "--", "---", "－－", "－－－", "－－－－", "－－－－－", "－－－－－－",
           "──", "━", "━━", "—－", "-", "----", "~", "~~", "~~~", "~~~~", "~~~~~", "……", "～",
           "．．．" /* 3 full width dots as ellipsis */ };
   private static final String[] other = {"·", "／", "／", "＊", "＆", "/", "//", "*", "※", "■", "●", "｜" };  // slashes are used in urls
@@ -294,17 +298,29 @@ public class ChineseTreebankLanguagePack extends AbstractTreebankLanguagePack {
 
   @Override
   public GrammaticalStructureFactory grammaticalStructureFactory() {
-    return new ChineseGrammaticalStructureFactory();
+    if (this.generateOriginalDependencies()) {
+      return new ChineseGrammaticalStructureFactory();
+    } else {
+      return new UniversalChineseGrammaticalStructureFactory();
+    }
   }
 
   @Override
   public GrammaticalStructureFactory grammaticalStructureFactory(Predicate<String> puncFilt) {
-    return new ChineseGrammaticalStructureFactory(puncFilt);
+    if (this.generateOriginalDependencies()) {
+      return new ChineseGrammaticalStructureFactory(puncFilt);
+    } else {
+      return new UniversalChineseGrammaticalStructureFactory(puncFilt);
+    }
   }
 
   @Override
   public GrammaticalStructureFactory grammaticalStructureFactory(Predicate<String> puncFilt, HeadFinder hf) {
-    return new ChineseGrammaticalStructureFactory(puncFilt, hf);
+    if (this.generateOriginalDependencies()) {
+      return new ChineseGrammaticalStructureFactory(puncFilt, hf);
+    } else {
+      return new UniversalChineseGrammaticalStructureFactory(puncFilt, hf);
+    }
   }
 
   @Override
@@ -327,7 +343,16 @@ public class ChineseTreebankLanguagePack extends AbstractTreebankLanguagePack {
   /** {@inheritDoc} */
   @Override
   public HeadFinder typedDependencyHeadFinder() {
-    return new ChineseSemanticHeadFinder(this);
+    if (this.generateOriginalDependencies()) {
+      return new ChineseSemanticHeadFinder(this);
+    } else {
+      return new UniversalChineseSemanticHeadFinder();
+    }
+  }
+
+  @Override
+  public boolean generateOriginalDependencies() {
+    return generateOriginalDependencies;
   }
 
 }

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import edu.stanford.nlp.io.IOUtils;
@@ -25,18 +26,19 @@ import edu.stanford.nlp.ling.HasTag;
 import edu.stanford.nlp.ling.HasWord;
 import edu.stanford.nlp.ling.Label;
 import edu.stanford.nlp.objectbank.XMLBeginEndIterator;
-
-import java.util.function.Function;
-
 import edu.stanford.nlp.util.Generics;
 import edu.stanford.nlp.util.PropertiesUtils;
 import edu.stanford.nlp.util.StringUtils;
+import edu.stanford.nlp.util.logging.Redwood;
 
 /**
  * Produces a list of sentences from either a plain text or XML document.
+ * This class acts like a Reader: It allows you to make a single pass through a
+ * list of sentences in a document. If you need to pass through the document
+ * multiple times, then you need to create a second DocumentProcessor.
  * <p>
  * Tokenization: The default tokenizer is {@link PTBTokenizer}. If null is passed
- * to <code>setTokenizerFactory</code>, then whitespace tokenization is assumed.
+ * to {@code setTokenizerFactory}, then whitespace tokenization is assumed.
  * <p>
  * Adding a new document type requires two steps:
  * <ol>
@@ -50,11 +52,15 @@ import edu.stanford.nlp.util.StringUtils;
  *
  * @author Spence Green
  */
-public class DocumentPreprocessor implements Iterable<List<HasWord>> {
+public class DocumentPreprocessor implements Iterable<List<HasWord>>  {
 
-  public static enum DocType {Plain, XML}
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(DocumentPreprocessor.class);
 
-  public static final String[] DEFAULT_SENTENCE_DELIMS = {".", "?", "!"};
+  public enum DocType {Plain, XML}
+
+  // todo: Should probably change this to be regex, but I've added some multi-character punctuation in the meantime
+  public static final String[] DEFAULT_SENTENCE_DELIMS = {".", "?", "!", "!!", "!!!", "??", "?!", "!?"};
 
   // inputReader is used in a fairly yucky way at the moment to communicate
   // from a XMLIterator across to a PlainTextIterator.  Maybe redo by making
@@ -65,13 +71,13 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
   //Configurable options
   private TokenizerFactory<? extends HasWord> tokenizerFactory = PTBTokenizer.coreLabelFactory();
   private String[] sentenceFinalPuncWords = DEFAULT_SENTENCE_DELIMS;
-  private Function<List<HasWord>,List<HasWord>> escaper = null;
-  private String sentenceDelimiter = null;
+  private Function<List<HasWord>,List<HasWord>> escaper; // = null;
+  private String sentenceDelimiter; // = null;
   /**
    * Example: if the words are already POS tagged and look like
    * foo_VB, you want to set the tagDelimiter to "_"
    */
-  private String tagDelimiter = null;
+  private String tagDelimiter; // = null;
   /**
    * When doing XML parsing, only accept text in between tags that
    * match this regular expression.  Defaults to everything.
@@ -82,8 +88,8 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
 
   //From PTB conventions
   private final String[] sentenceFinalFollowers = {")", "]", "\"", "\'", "''", "-RRB-", "-RSB-", "-RCB-"};
-  
-  private boolean keepEmptySentences = false;
+
+  private boolean keepEmptySentences; // = false;
 
 
   /**
@@ -128,8 +134,8 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
     try {
       inputReader = IOUtils.readerFromString(docPath, encoding);
     } catch (IOException ioe) {
-      System.err.printf("%s: Could not open path %s\n", this.getClass().getName(), docPath);
-      throw new RuntimeIOException(ioe);
+      throw new RuntimeIOException(String.format("%s: Could not open path %s", this.getClass().getName(), docPath),
+              ioe);
     }
   }
 
@@ -147,7 +153,7 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
    * <p>
    * For newline tokenization, use the argument {"\n"}.
    *
-   * @param sentenceFinalPuncWords
+   * @param sentenceFinalPuncWords An array of words that count as sentence final punctuation.
    */
   public void setSentenceFinalPuncWords(String[] sentenceFinalPuncWords) {
     this.sentenceFinalPuncWords = sentenceFinalPuncWords;
@@ -206,6 +212,10 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
   /**
    * Returns sentences until the document is exhausted. Calls close() if the end of the document
    * is reached. Otherwise, the user is required to close the stream.
+   *
+   * @return An Iterator over sentences (each a List of word tokens).
+   * Although the type is given as {@code List<HasWord>}, in practice you get a List of CoreLabel,
+   * and you can cast down to that. (Someday we might manage to fix the generic typing....)
    */
   @Override
   public Iterator<List<HasWord>> iterator() {
@@ -225,8 +235,8 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
     private final Tokenizer<? extends HasWord> tokenizer;
     private final Set<String> sentDelims;
     private final Set<String> delimFollowers;
-    private Function<String, String[]> splitTag;
-    private List<HasWord> nextSent = null;
+    private final Function<String, String[]> splitTag;
+    private List<HasWord> nextSent; // = null;
     private final List<HasWord> nextSentCarryover = Generics.newArrayList();
 
     public PlainTextIterator() {
@@ -263,9 +273,12 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       // If tokens are tagged, then we must split them
       // Note that if the token contains two or more instances of the delimiter, then the last
       // instance is regarded as the split point.
-      if (tagDelimiter != null) {
+      if (tagDelimiter == null) {
+        splitTag = null;
+      } else {
         splitTag = new Function<String,String[]>() {
           private final String splitRegex = String.format("%s(?!.*%s)", tagDelimiter, tagDelimiter);
+          @Override
           public String[] apply(String in) {
             final String[] splits = in.trim().split(splitRegex);
             if(splits.length == 2)
@@ -280,6 +293,11 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
     }
 
     private void primeNext() {
+      if (inputReader == null) {
+        // we've already been out of stuff and have closed the input reader; so just return
+        return;
+      }
+
       nextSent = Generics.newArrayList(nextSentCarryover);
       nextSentCarryover.clear();
       boolean seenBoundary = false;
@@ -287,7 +305,10 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       if (!tokenizer.hasNext()) {
         IOUtils.closeIgnoringExceptions(inputReader);
         inputReader = null;
-        nextSent = null;
+        // nextSent = null; // WRONG: There may be something in it from the nextSentCarryover
+        if (nextSent.isEmpty()) {
+          nextSent = null;
+        }
         return;
       }
 
@@ -328,8 +349,8 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
         // sentence, which at this point means the sentence delimiter
         // was a whitespace token such as \n.  We might as well keep
         // going as if we had never seen anything.
-        if (seenBoundary && delimFollowers.size() == 0) {
-          if (nextSent.size() > 0 || keepEmptySentences) {
+        if (seenBoundary && delimFollowers.isEmpty()) {
+          if ( ! nextSent.isEmpty() || keepEmptySentences) {
             break;
           } else {
             seenBoundary = false;
@@ -337,7 +358,7 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
         }
       } while (tokenizer.hasNext());
 
-      if (nextSent.size() == 0 && nextSentCarryover.size() == 0 && !keepEmptySentences) {
+      if (nextSent.isEmpty() && nextSentCarryover.isEmpty() && ! keepEmptySentences) {
         IOUtils.closeIgnoringExceptions(inputReader);
         inputReader = null;
         nextSent = null;
@@ -346,6 +367,7 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       }
     }
 
+    @Override
     public boolean hasNext() {
       if (nextSent == null) {
         primeNext();
@@ -353,6 +375,7 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       return nextSent != null;
     }
 
+    @Override
     public List<HasWord> next() {
       if (nextSent == null) {
         primeNext();
@@ -365,7 +388,9 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       return thisIteration;
     }
 
+    @Override
     public void remove() { throw new UnsupportedOperationException(); }
+
   }
 
 
@@ -377,7 +402,7 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
     private List<HasWord> nextSent; // = null;
 
     public XMLIterator() {
-      xmlItr = new XMLBeginEndIterator<String>(inputReader, elementDelimiter);
+      xmlItr = new XMLBeginEndIterator<>(inputReader, elementDelimiter);
       originalDocReader = inputReader;
       primeNext();
     }
@@ -407,10 +432,12 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       } while (nextSent == null);
     }
 
+    @Override
     public boolean hasNext() {
       return nextSent != null;
     }
 
+    @Override
     public List<HasWord> next() {
       if (nextSent == null) {
         throw new NoSuchElementException();
@@ -420,19 +447,22 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       return thisSentence;
     }
 
+    @Override
     public void remove() { throw new UnsupportedOperationException(); }
+
   } // end class XMLIterator
 
 
   private static String usage() {
     StringBuilder sb = new StringBuilder();
-    String nl = System.getProperty("line.separator");
+    String nl = System.lineSeparator();
     sb.append(String.format("Usage: java %s [OPTIONS] [file] [< file]%n%n", DocumentPreprocessor.class.getName()));
     sb.append("Options:").append(nl);
     sb.append("-xml delim              : XML input with associated delimiter.").append(nl);
     sb.append("-encoding type          : Input encoding (default: UTF-8).").append(nl);
     sb.append("-printSentenceLengths   : ").append(nl);
     sb.append("-noTokenization         : Split on newline delimiters only.").append(nl);
+    sb.append("-printOriginalText      : Print the original, not normalized form of tokens.").append(nl);
     sb.append("-suppressEscaping       : Suppress PTB escaping.").append(nl);
     sb.append("-tokenizerOptions opts  : Specify custom tokenizer options.").append(nl);
     sb.append("-tag delim              : Input tokens are tagged. Split tags.").append(nl);
@@ -453,19 +483,19 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
     argOptionDefs.put("whitespaceTokenization", 0);
     return argOptionDefs;
   }
-  
+
   /**
    * A simple, deterministic sentence-splitter. This method only supports the English
    * tokenizer, so for other languages you should run the tokenizer first and then
    * run this sentence splitter with the "-whitespaceTokenization" option.
-   * 
+   *
    * @param args Command-line arguments
    */
   public static void main(String[] args) throws IOException {
     final Properties options = StringUtils.argsToProperties(args, argOptionDefs());
     if (options.containsKey("help")) {
-      System.err.println(usage());
-      System.exit(-1);
+      log.info(usage());
+      return;
     }
 
     // Command-line flags
@@ -473,10 +503,10 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
     boolean printSentenceLengths = PropertiesUtils.getBool(options,"printSentenceLengths", false);
     String xmlElementDelimiter = options.getProperty("xml", null);
     DocType docType = xmlElementDelimiter == null ? DocType.Plain : DocType.XML;
-    String sentenceDelimiter = options.containsKey("-noTokenization") ? System.getProperty("line.separator") : null;
+    String sentenceDelimiter = options.containsKey("noTokenization") ? System.getProperty("line.separator") : null;
     String tagDelimiter = options.getProperty("tag", null);
     String[] sentenceDelims = null;
-    
+
     // Setup the TokenizerFactory
     int numFactoryFlags = 0;
     boolean suppressEscaping = options.containsKey("suppressEscaping");
@@ -488,11 +518,11 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
     boolean whitespaceTokenization = options.containsKey("whitespaceTokenization");
     if (whitespaceTokenization) numFactoryFlags += 1;
     if (numFactoryFlags > 1) {
-      System.err.println("Only one tokenizer flag allowed at a time: ");
-      System.err.println("  -suppressEscaping, -tokenizerOptions, -printOriginalText, -whitespaceTokenization");
-      System.exit(-1);
+      log.info("Only one tokenizer flag allowed at a time: ");
+      log.info("  -suppressEscaping, -tokenizerOptions, -printOriginalText, -whitespaceTokenization");
+      return;
     }
-    
+
     TokenizerFactory<? extends HasWord> tf = null;
     if (suppressEscaping) {
       tf = PTBTokenizer.factory(new CoreLabelTokenFactory(), "ptb3Escaping=false");
@@ -502,13 +532,13 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       tf = PTBTokenizer.factory(new CoreLabelTokenFactory(), "invertible=true");
     } else if (whitespaceTokenization) {
       List<String> whitespaceDelims =
-          new ArrayList<String>(Arrays.asList(DocumentPreprocessor.DEFAULT_SENTENCE_DELIMS));
+          new ArrayList<>(Arrays.asList(DocumentPreprocessor.DEFAULT_SENTENCE_DELIMS));
       whitespaceDelims.add(WhitespaceLexer.NEWLINE);
       sentenceDelims = whitespaceDelims.toArray(new String[whitespaceDelims.size()]);
     } else {
       tf = PTBTokenizer.factory(new CoreLabelTokenFactory(), "");
     }
-    
+
     String fileList = options.getProperty("", null);
     String[] files = fileList == null ? new String[1] : fileList.split("\\s+");
 
@@ -516,7 +546,7 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
     PrintWriter pw = new PrintWriter(new OutputStreamWriter(System.out, encoding), true);
     for (String file : files) {
       DocumentPreprocessor docPreprocessor;
-      if (file == null || file.length() == 0) {
+      if (file == null || file.isEmpty()) {
         docPreprocessor = new DocumentPreprocessor(new InputStreamReader(System.in, encoding));
       } else {
         docPreprocessor = new DocumentPreprocessor(file, docType, encoding);
@@ -538,7 +568,7 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       for (List<HasWord> sentence : docPreprocessor) {
         numSents++;
         if (printSentenceLengths) {
-          System.err.println("Length:\t" + sentence.size());
+          System.err.printf("Length: %d%n", sentence.size());
         }
         boolean printSpace = false;
         for (HasWord word : sentence) {
@@ -560,6 +590,7 @@ public class DocumentPreprocessor implements Iterable<List<HasWord>> {
       }
     }
     pw.close();
-    System.err.println("Read in " + numSents + " sentences.");
+    System.err.printf("Read in %d sentences.%n", numSents);
   }
+
 }

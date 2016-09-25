@@ -1,4 +1,5 @@
-package edu.stanford.nlp.parser.metrics;
+package edu.stanford.nlp.parser.metrics; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.BufferedWriter;
 import java.io.FileNotFoundException;
@@ -14,10 +15,9 @@ import java.util.PriorityQueue;
 import java.util.Properties;
 import java.util.Set;
 
-import edu.stanford.nlp.international.Languages;
-import edu.stanford.nlp.international.Languages.Language;
+import edu.stanford.nlp.international.Language;
 import edu.stanford.nlp.ling.Label;
-import edu.stanford.nlp.ling.Sentence;
+import edu.stanford.nlp.ling.SentenceUtils;
 import edu.stanford.nlp.parser.lexparser.TreebankLangParserParams;
 import edu.stanford.nlp.trees.Constituent;
 import edu.stanford.nlp.trees.ConstituentFactory;
@@ -48,7 +48,10 @@ import edu.stanford.nlp.util.Triple;
  * @author Dan Klein
  * @author Spence Green
  */
-public class Evalb extends AbstractEval {
+public class Evalb extends AbstractEval  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(Evalb.class);
 
   private final ConstituentFactory cf;
 
@@ -75,9 +78,9 @@ public class Evalb extends AbstractEval {
       return;
 
     } else if (guess.yield().size() != gold.yield().size()) {
-      System.err.println("Warning: yield differs:");
-      System.err.println("Guess: " + Sentence.listToString(guess.yield()));
-      System.err.println("Gold:  " + Sentence.listToString(gold.yield()));
+      log.info("Warning: yield differs:");
+      log.info("Guess: " + SentenceUtils.listToString(guess.yield()));
+      log.info("Gold:  " + SentenceUtils.listToString(gold.yield()));
     }
 
     super.evaluate(guess, gold, pw);
@@ -134,7 +137,7 @@ public class Evalb extends AbstractEval {
     sb.append(String.format("Usage: java %s [OPTS] gold guess%n%n",Evalb.class.getName()));
     sb.append("Options:").append(nl);
     sb.append("  -v         : Verbose mode.").append(nl);
-    sb.append("  -l lang    : Select language settings from ").append(Languages.listOfLanguages()).append(nl);
+    sb.append("  -l lang    : Select language settings from ").append(Language.langList).append(nl);
     sb.append("  -y num     : Skip gold trees with yields longer than num.").append(nl);
     sb.append("  -s num     : Sort the trees by F1 and output the num lowest F1 trees.").append(nl);
     sb.append("  -c         : Compute LP/LR/F1 by category.").append(nl);
@@ -161,24 +164,24 @@ public class Evalb extends AbstractEval {
    */
   public static void main(String[] args) {
     if (args.length < minArgs) {
-      System.err.println(usage());
+      log.info(usage());
       System.exit(-1);
     }
     Properties options = StringUtils.argsToProperties(args, optionArgDefs());
     Language language = PropertiesUtils.get(options, "l", Language.English, Language.class);
-    final TreebankLangParserParams tlpp = Languages.getLanguageParams(language);
+    final TreebankLangParserParams tlpp = language.params;
     final int maxGoldYield = PropertiesUtils.getInt(options, "y", Integer.MAX_VALUE);
     final boolean VERBOSE = PropertiesUtils.getBool(options, "v", false);
     final boolean sortByF1 = PropertiesUtils.hasProperty(options, "s");
     int worstKTreesToEmit = PropertiesUtils.getInt(options, "s", 0);
-    PriorityQueue<Triple<Double,Tree,Tree>> queue = sortByF1 ? new PriorityQueue<Triple<Double,Tree,Tree>>(2000, new F1Comparator()) : null;
+    PriorityQueue<Triple<Double,Tree,Tree>> queue = sortByF1 ? new PriorityQueue<>(2000, new F1Comparator()) : null;
     boolean doCatLevel = PropertiesUtils.getBool(options, "c", false);
     String labelRegex = options.getProperty("f", null);
     String encoding = options.getProperty("e", "UTF-8");
 
     String[] parsedArgs = options.getProperty("","").split("\\s+");
     if (parsedArgs.length != minArgs) {
-      System.err.println(usage());
+      log.info(usage());
       System.exit(-1);
     }
     String goldFile = parsedArgs[0];
@@ -265,7 +268,7 @@ public class Evalb extends AbstractEval {
   private static void emitSortedTrees(PriorityQueue<Triple<Double, Tree, Tree>> queue, int worstKTreesToEmit,
       String filePrefix) {
 
-    if(queue == null) System.err.println("Queue was not initialized properly");
+    if(queue == null) log.info("Queue was not initialized properly");
 
     try {
       final PrintWriter guessPw = new PrintWriter(new BufferedWriter(new OutputStreamWriter(new FileOutputStream(filePrefix + ".kworst.guess"),"UTF-8")));
@@ -318,7 +321,7 @@ public class Evalb extends AbstractEval {
   private static void storeTrees(PriorityQueue<Triple<Double, Tree, Tree>> queue, Tree guess, Tree gold, double curF1) {
     if(queue == null) return;
 
-    queue.add(new Triple<Double,Tree,Tree>(curF1,gold,guess));
+    queue.add(new Triple<>(curF1, gold, guess));
   }
 
   private static class F1Comparator implements Comparator<Triple<Double, Tree, Tree>> {

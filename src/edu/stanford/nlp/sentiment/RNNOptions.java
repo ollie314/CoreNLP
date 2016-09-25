@@ -11,6 +11,7 @@ import edu.stanford.nlp.util.StringUtils;
 
 public class RNNOptions implements Serializable {
 
+  // TODO [2014]: This should really be a long
   /**
    * The random seed the random number generator is initialized with.
    */
@@ -141,7 +142,7 @@ public class RNNOptions implements Serializable {
       wordVectors = args[argIndex + 1];
       return argIndex + 2;
     } else if (args[argIndex].equalsIgnoreCase("-unkWord")) {
-      unkWord = args[argIndex] + 1;
+      unkWord = args[argIndex + 1];
       return argIndex + 2;
     } else if (args[argIndex].equalsIgnoreCase("-numHid")) {
       numHid = Integer.parseInt(args[argIndex + 1]);

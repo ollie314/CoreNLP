@@ -1,38 +1,36 @@
-package edu.stanford.nlp.pipeline;
+package edu.stanford.nlp.pipeline; 
+import edu.stanford.nlp.util.logging.Redwood;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 
 import edu.stanford.nlp.ie.AbstractSequenceClassifier;
 import edu.stanford.nlp.ie.crf.CRFClassifier;
+import edu.stanford.nlp.ling.CoreAnnotation;
 import edu.stanford.nlp.ling.CoreLabel;
-import edu.stanford.nlp.ling.ChineseCoreAnnotations;
+import edu.stanford.nlp.ling.SegmenterCoreAnnotations;
 import edu.stanford.nlp.ling.CoreAnnotations;
 import edu.stanford.nlp.util.CoreMap;
 import edu.stanford.nlp.util.PropertiesUtils;
-import edu.stanford.nlp.util.Timing;
 
 /**
- * This class will add Segmentation information to an
- * Annotation.  
- * It assumes that the original String or List<String> is under the Annotation.ORIG_STRING_KEY 
- * and also corresponding character level information is under Annotation.WORDS_KEY
- * and addes segmentation information to each CoreLabel,
- * in the CoreLabel.CH_SEG_KEY field.
+ * This class will add segmentation information to an Annotation.
+ * It assumes that the original document is a List of sentences under the
+ * SentencesAnnotation.class key, and that each sentence has a
+ * TextAnnotation.class key. This Annotator adds corresponding
+ * information under a CharactersAnnotation.class key prior to segmentation,
+ * and a TokensAnnotation.class key with value of a List of CoreLabel
+ * after segmentation.
  *
  * @author Pi-Chuan Chang
  */
-public class ChineseSegmenterAnnotator implements Annotator {
+public class ChineseSegmenterAnnotator implements Annotator  {
 
-  private AbstractSequenceClassifier<?> segmenter = null;
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(ChineseSegmenterAnnotator.class);
 
-  private Timing timer = new Timing();
-  private static long millisecondsAnnotating = 0;
-  private boolean VERBOSE = false;
-  
+  private AbstractSequenceClassifier<?> segmenter;
+  private final boolean VERBOSE;
+
   private static final String DEFAULT_SEG_LOC =
     "/u/nlp/data/gale/segtool/stanford-seg/classifiers-2010/05202008-ctb6.processed-chris6.lex.gz";
 
@@ -49,7 +47,7 @@ public class ChineseSegmenterAnnotator implements Annotator {
   public ChineseSegmenterAnnotator(boolean verbose) {
     this(DEFAULT_SEG_LOC, verbose);
   }
-  
+
   public ChineseSegmenterAnnotator(String segLoc, boolean verbose) {
     this(segLoc, verbose, DEFAULT_SER_DICTIONARY, DEFAULT_SIGHAN_CORPORA_DICT);
   }
@@ -66,10 +64,11 @@ public class ChineseSegmenterAnnotator implements Annotator {
     String model = null;
     // Keep only the properties that apply to this annotator
     Properties modelProps = new Properties();
+    String desiredKey = name + '.';
     for (String key : props.stringPropertyNames()) {
-      if (key.startsWith(name + ".")) {
+      if (key.startsWith(desiredKey)) {
         // skip past name and the subsequent "."
-        String modelKey = key.substring(name.length() + 1);
+        String modelKey = key.substring(desiredKey.length());
         if (modelKey.equals("model")) {
           model = props.getProperty(key);
         } else {
@@ -77,28 +76,26 @@ public class ChineseSegmenterAnnotator implements Annotator {
         }
       }
     }
-    this.VERBOSE = PropertiesUtils.getBool(props, name + ".verbose", true);
+    this.VERBOSE = PropertiesUtils.getBool(props, name + ".verbose", false);
     if (model == null) {
       throw new RuntimeException("Expected a property " + name + ".model");
     }
     loadModel(model, modelProps);
   }
-  
+
+  @SuppressWarnings("unused")
   private void loadModel(String segLoc) {
-    if (VERBOSE) {    
-      timer.start();
-      System.err.print("Loading Segmentation Model ["+segLoc+"]...");
+    // don't write very much, because the CRFClassifier already reports loading
+    if (VERBOSE) {
+      log.info("Loading segmentation model ... ");
     }
     segmenter = CRFClassifier.getClassifierNoExceptions(segLoc);
-    if (VERBOSE) {    
-      timer.stop("done.");
-    }
   }
-  
+
   private void loadModel(String segLoc, Properties props) {
+    // don't write very much, because the CRFClassifier already reports loading
     if (VERBOSE) {
-      timer.start();
-      System.err.print("Loading Segmentation Model ["+segLoc+"]...");
+      log.info("Loading Segmentation Model ... ");
     }
     try {
       segmenter = CRFClassifier.getClassifier(segLoc, props);
@@ -107,15 +104,12 @@ public class ChineseSegmenterAnnotator implements Annotator {
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
-    if (VERBOSE) {    
-      timer.stop("done.");
-    }
   }
-  
+
+  @Override
   public void annotate(Annotation annotation) {
-    if (VERBOSE) {    
-      timer.start();
-      System.err.print("Adding Segmentation annotation...");
+    if (VERBOSE) {
+      log.info("Adding Segmentation annotation ... ");
     }
     List<CoreMap> sentences = annotation.get(CoreAnnotations.SentencesAnnotation.class);
     if (sentences != null) {
@@ -125,22 +119,18 @@ public class ChineseSegmenterAnnotator implements Annotator {
     } else {
       doOneSentence(annotation);
     }
-    if (VERBOSE) {    
-      millisecondsAnnotating += timer.stop("done.");
-      //System.err.println("output: "+l+"\n"); 
-    }    
   }
 
-  public void doOneSentence(CoreMap annotation) {
+  private void doOneSentence(CoreMap annotation) {
     splitCharacters(annotation);
     runSegmentation(annotation);
   }
 
-  public void splitCharacters(CoreMap annotation) {
+  private static void splitCharacters(CoreMap annotation) {
     String origText = annotation.get(CoreAnnotations.TextAnnotation.class);
-    
+
     boolean seg = true;
-    List<CoreLabel> words = new ArrayList<CoreLabel>();
+    List<CoreLabel> words = new ArrayList<>();
 
     for (int i = 0; i < origText.length(); i++) {
       CoreLabel wi = new CoreLabel();
@@ -148,9 +138,12 @@ public class ChineseSegmenterAnnotator implements Annotator {
       String wordString = new String(ca);
 
       // if this word is a whitespace or a control character, set 'seg' to true for next word, and break
-      if (Character.isWhitespace(origText.charAt(i)) || Character.isISOControl(origText.charAt(i))) {
+      if ((Character.isSpaceChar(origText.charAt(i)) || Character.isISOControl(origText.charAt(i))) &&
+          ! (origText.charAt(i) == '\n' || origText.charAt(i) == '\r')) {
         seg = true;
-        continue;
+      } else if (Character.isISOControl(origText.charAt(i))) {
+        // skip it but don't set seg
+        seg = false;
       } else {
         // if this word is a word, put it as a feature label and set seg to false for next word
         wi.set(CoreAnnotations.ChineseCharAnnotation.class, wordString);
@@ -166,56 +159,72 @@ public class ChineseSegmenterAnnotator implements Annotator {
       }
     }
 
-    annotation.set(ChineseCoreAnnotations.CharactersAnnotation.class, words);
-    if (VERBOSE) {
-      System.err.println("output: " + words);
-    }    
+    annotation.set(SegmenterCoreAnnotations.CharactersAnnotation.class, words);
   }
 
-  public void runSegmentation(CoreMap annotation) {
+  private void runSegmentation(CoreMap annotation) {
     //0 2
     // A BC D E
     // 1 10 1 1
     // 0 12 3 4
-    // 0, 0+1 , 
-    
+    // 0, 0+1 ,
+
     String text = annotation.get(CoreAnnotations.TextAnnotation.class);
-    List<CoreLabel> sentChars = annotation.get(ChineseCoreAnnotations.CharactersAnnotation.class);
-    List<CoreLabel> tokens = new ArrayList<CoreLabel>();
+    List<CoreLabel> sentChars = annotation.get(SegmenterCoreAnnotations.CharactersAnnotation.class);
+    List<CoreLabel> tokens = new ArrayList<>();
     annotation.set(CoreAnnotations.TokensAnnotation.class, tokens);
 
+    text = text.replaceAll("[\n\r]", "");
     List<String> words = segmenter.segmentString(text);
     if (VERBOSE) {
-      System.err.println(text);
-      System.err.println("--->");
-      System.err.println(words);
+      log.info(text);
+      log.info("--->");
+      log.info(words);
     }
-    
+
     int pos = 0;
     for (String w : words) {
       CoreLabel fl = sentChars.get(pos);
       fl.set(CoreAnnotations.ChineseSegAnnotation.class, "1");
-      if (w.length() == 0) {
+      if (w.isEmpty()) {
         continue;
       }
       CoreLabel token = new CoreLabel();
       token.setWord(w);
+      token.setValue(w);
       token.set(CoreAnnotations.CharacterOffsetBeginAnnotation.class, fl.get(CoreAnnotations.CharacterOffsetBeginAnnotation.class));
       pos += w.length();
       fl = sentChars.get(pos - 1);
       token.set(CoreAnnotations.CharacterOffsetEndAnnotation.class, fl.get(CoreAnnotations.CharacterOffsetEndAnnotation.class));
+      if (VERBOSE) {
+        log.info("Adding token " + token.toShorterString());
+      }
       tokens.add(token);
     }
   }
 
 
   @Override
-  public Set<Requirement> requires() {
+  public Set<Class<? extends CoreAnnotation>> requires() {
     return Collections.emptySet();
   }
 
   @Override
-  public Set<Requirement> requirementsSatisfied() {
-    return Collections.singleton(TOKENIZE_REQUIREMENT);
+  public Set<Class<? extends CoreAnnotation>> requirementsSatisfied() {
+    return new HashSet<>(Arrays.asList(
+        CoreAnnotations.TextAnnotation.class,
+        CoreAnnotations.TokensAnnotation.class,
+        CoreAnnotations.CharacterOffsetBeginAnnotation.class,
+        CoreAnnotations.CharacterOffsetEndAnnotation.class,
+        CoreAnnotations.BeforeAnnotation.class,
+        CoreAnnotations.AfterAnnotation.class,
+        CoreAnnotations.TokenBeginAnnotation.class,
+        CoreAnnotations.TokenEndAnnotation.class,
+        CoreAnnotations.PositionAnnotation.class,
+        CoreAnnotations.IndexAnnotation.class,
+        CoreAnnotations.OriginalTextAnnotation.class,
+        CoreAnnotations.ValueAnnotation.class
+    ));
   }
+
 }

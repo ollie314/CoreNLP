@@ -5,10 +5,9 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.Set;
 
-import edu.stanford.nlp.international.Languages;
-import edu.stanford.nlp.international.Languages.Language;
+import edu.stanford.nlp.international.Language;
 import edu.stanford.nlp.ling.Label;
-import edu.stanford.nlp.ling.Sentence;
+import edu.stanford.nlp.ling.SentenceUtils;
 import edu.stanford.nlp.parser.lexparser.EnglishTreebankParserParams;
 import edu.stanford.nlp.parser.lexparser.TreebankLangParserParams;
 import edu.stanford.nlp.trees.Constituent;
@@ -62,8 +61,7 @@ public class TsarfatyEval extends AbstractEval {
 
     } else {
       Tree[] kids = t.children();
-      for (int i = 0; i < kids.length; i++)
-        position = extractDeps(kids[i], position, deps);
+      for (Tree kid : kids) position = extractDeps(kid, position, deps);
     }
 
     return position;
@@ -75,7 +73,7 @@ public class TsarfatyEval extends AbstractEval {
     usage.append(String.format("Usage: java %s [OPTS] gold guess\n\n",TsarfatyEval.class.getName()));
     usage.append("Options:\n");
     usage.append("  -v         : Verbose mode.\n");
-    usage.append("  -l lang    : Select language settings from " + Languages.class.getName() + "\n");
+    usage.append("  -l lang    : Select language settings from " + Language.class.getName() + "\n");
     usage.append("  -y num     : Skip gold trees with yields longer than num.\n");
     usage.append("  -g num     : Skip guess trees with yields longer than num.\n");
     usage.append("  -t         : Tagging mode (default: segmentation).\n");
@@ -110,7 +108,7 @@ public class TsarfatyEval extends AbstractEval {
         switch (args[i]) {
           case "-l":
             Language lang = Language.valueOf(args[++i].trim());
-            tlpp = Languages.getLanguageParams(lang);
+            tlpp = lang.params;
 
             break;
           case "-y":
@@ -178,7 +176,7 @@ public class TsarfatyEval extends AbstractEval {
     for(final Tree guess : guessTreebank) {
       final Tree evalGuess = tc.transformTree(guess);
       final ArrayList<Label> guessSent = guess.yield();
-      final String guessChars = Sentence.listToString(guessSent).replaceAll("\\s+","");
+      final String guessChars = SentenceUtils.listToString(guessSent).replaceAll("\\s+","");
       if(guessSent.size() > maxGuessYield) {
         skippedGuessTrees++;
         continue;
@@ -191,7 +189,7 @@ public class TsarfatyEval extends AbstractEval {
         goldLineId++;
 
         final ArrayList<Label> goldSent = gold.yield();
-        final String goldChars = Sentence.listToString(goldSent).replaceAll("\\s+","");
+        final String goldChars = SentenceUtils.listToString(goldSent).replaceAll("\\s+","");
 
         if(goldSent.size() > maxGoldYield) {
           continue;

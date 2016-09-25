@@ -1,4 +1,5 @@
-package edu.stanford.nlp.ie.machinereading.common;
+package edu.stanford.nlp.ie.machinereading.common; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.BufferedReader;
 import java.util.ArrayList;
@@ -8,7 +9,10 @@ import java.util.Set;
 import edu.stanford.nlp.io.IOUtils;
 import edu.stanford.nlp.util.Generics;
 
-public class StringDictionary {
+public class StringDictionary  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(StringDictionary.class);
 
   public static class IndexAndCount {
 
@@ -121,7 +125,7 @@ public class StringDictionary {
   }
 
   /**
-   * Saves all dictionary entries that appeared > threshold times Note: feature
+   * Saves all dictionary entries that appeared {@literal >} threshold times Note: feature
    * indices are changed to contiguous values starting at 0. This is needed in
    * order to minimize the memory allocated for the expanded feature vectors
    * (average perceptron).
@@ -131,18 +135,17 @@ public class StringDictionary {
     String fileName = path + java.io.File.separator + prefix + "." + mName;
     java.io.PrintStream os = new java.io.PrintStream(new java.io.FileOutputStream(fileName));
 
-    Set<String> keys = mDict.keySet();
     int index = 0;
-    for (String key : keys) {
-      IndexAndCount ic = mDict.get(key);
+    for (Map.Entry<String, IndexAndCount> entry : mDict.entrySet()) {
+      IndexAndCount ic = entry.getValue();
       if (ic.mCount > threshold) {
-        os.println(key + " " + index + " " + ic.mCount);
+        os.println(entry.getKey() + ' ' + index + ' ' + ic.mCount);
         index++;
       }
     }
 
     os.close();
-    System.err.println("Saved " + index + "/" + mDict.size() + " entries for dictionary \"" + mName + "\".");
+    log.info("Saved " + index + "/" + mDict.size() + " entries for dictionary \"" + mName + "\".");
   }
 
   public void clear() {
@@ -177,10 +180,11 @@ public class StringDictionary {
     }
 
     is.close();
-    System.err.println("Loaded " + mDict.size() + " entries for dictionary \"" + mName + "\".");
+    log.info("Loaded " + mDict.size() + " entries for dictionary \"" + mName + "\".");
   }
 
   public java.util.Set<String> keys() {
     return mDict.keySet();
   }
+
 }

@@ -1,21 +1,25 @@
-package edu.stanford.nlp.pipeline;
+package edu.stanford.nlp.pipeline; 
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-import edu.stanford.nlp.dcoref.CorefChain;
-import edu.stanford.nlp.dcoref.CorefCoreAnnotations;
+import edu.stanford.nlp.coref.CorefCoreAnnotations;
+
+import edu.stanford.nlp.coref.data.CorefChain;
 import edu.stanford.nlp.ie.machinereading.structure.EntityMention;
 import edu.stanford.nlp.ie.machinereading.structure.ExtractionObject;
 import edu.stanford.nlp.ie.machinereading.structure.MachineReadingAnnotations;
 import edu.stanford.nlp.ie.machinereading.structure.RelationMention;
+import edu.stanford.nlp.ie.util.RelationTriple;
 import edu.stanford.nlp.ling.CoreAnnotations;
 import edu.stanford.nlp.ling.CoreLabel;
 import edu.stanford.nlp.ling.IndexedWord;
+import edu.stanford.nlp.naturalli.NaturalLogicAnnotations;
 import edu.stanford.nlp.neural.rnn.RNNCoreAnnotations;
 import edu.stanford.nlp.sentiment.SentimentCoreAnnotations;
 import edu.stanford.nlp.stats.Counters;
@@ -40,7 +44,8 @@ import nu.xom.*;
  * see {@link edu.stanford.nlp.pipeline.AnnotationSerializer}; e.g.,
  * {@link edu.stanford.nlp.pipeline.ProtobufAnnotationSerializer}.
  */
-public class XMLOutputter extends AnnotationOutputter {
+public class XMLOutputter extends AnnotationOutputter  {
+
   // the namespace is set in the XSLT file
   private static final String NAMESPACE_URI = null;
   private static final String STYLESHEET_NAME = "CoreNLP-to-HTML.xsl";
@@ -52,7 +57,11 @@ public class XMLOutputter extends AnnotationOutputter {
   public void print(Annotation annotation, OutputStream os, Options options) throws IOException {
     Document xmlDoc = annotationToDoc(annotation, options);
     Serializer ser = new Serializer(os, options.encoding);
-    ser.setIndent(2);
+    if (options.pretty) {
+      ser.setIndent(2);
+    } else {
+      ser.setIndent(0);
+    }
     ser.setMaxLength(0);
     ser.write(xmlDoc);
     ser.flush();
@@ -88,7 +97,7 @@ public class XMLOutputter extends AnnotationOutputter {
     Element root = new Element("root", NAMESPACE_URI);
     Document xmlDoc = new Document(root);
     ProcessingInstruction pi = new ProcessingInstruction("xml-stylesheet",
-          "href=\"" + STYLESHEET_NAME + "\" type=\"text/xsl\"");
+            "href=\"" + STYLESHEET_NAME + "\" type=\"text/xsl\"");
     xmlDoc.insertChild(pi, 0);
     Element docElem = new Element("document", NAMESPACE_URI);
     root.appendChild(docElem);
@@ -159,12 +168,38 @@ public class XMLOutputter extends AnnotationOutputter {
           if (depInfo != null) {
             sentElem.appendChild(depInfo);
           }
+
+          depInfo = buildDependencyTreeInfo("enhanced-dependencies", sentence.get(SemanticGraphCoreAnnotations.EnhancedDependenciesAnnotation.class), tokens, NAMESPACE_URI);
+          if (depInfo != null) {
+            sentElem.appendChild(depInfo);
+          }
+
+          depInfo = buildDependencyTreeInfo("enhanced-plus-plus-dependencies", sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class), tokens, NAMESPACE_URI);
+          if (depInfo != null) {
+            sentElem.appendChild(depInfo);
+          }
+        }
+
+        // add Open IE triples
+        Collection<RelationTriple> openieTriples = sentence.get(NaturalLogicAnnotations.RelationTriplesAnnotation.class);
+        if (openieTriples != null) {
+          Element openieElem = new Element("openie", NAMESPACE_URI);
+          addTriples(openieTriples, openieElem, NAMESPACE_URI);
+          sentElem.appendChild(openieElem);
+        }
+
+        // add KBP triples
+        Collection<RelationTriple> kbpTriples = sentence.get(CoreAnnotations.KBPTriplesAnnotation.class);
+        if (kbpTriples != null) {
+          Element kbpElem = new Element("kbp", NAMESPACE_URI);
+          addTriples(kbpTriples, kbpElem, NAMESPACE_URI);
+          sentElem.appendChild(kbpElem);
         }
 
         // add the MR entities and relations
         List<EntityMention> entities = sentence.get(MachineReadingAnnotations.EntityMentionsAnnotation.class);
         List<RelationMention> relations = sentence.get(MachineReadingAnnotations.RelationMentionsAnnotation.class);
-        if (entities != null && entities.size() > 0){
+        if (entities != null && ! entities.isEmpty()){
           Element mrElem = new Element("MachineReading", NAMESPACE_URI);
           Element entElem = new Element("entities", NAMESPACE_URI);
           addEntities(entities, entElem, NAMESPACE_URI);
@@ -179,18 +214,16 @@ public class XMLOutputter extends AnnotationOutputter {
           sentElem.appendChild(mrElem);
         }
 
-                
         /**
          * Adds sentiment as an attribute of this sentence.
          */
-        Tree sentimentTree = sentence.get(SentimentCoreAnnotations.AnnotatedTree.class);
+        Tree sentimentTree = sentence.get(SentimentCoreAnnotations.SentimentAnnotatedTree.class);
         if (sentimentTree != null) {
           int sentiment = RNNCoreAnnotations.getPredictedClass(sentimentTree);
           sentElem.addAttribute(new Attribute("sentimentValue", Integer.toString(sentiment)));
-          String sentimentClass = sentence.get(SentimentCoreAnnotations.ClassName.class);
+          String sentimentClass = sentence.get(SentimentCoreAnnotations.SentimentClass.class);
           sentElem.addAttribute(new Attribute("sentiment", sentimentClass.replaceAll(" ", "")));
         }
-
 
         // add the sentence to the root
         sentencesElem.appendChild(sentElem);
@@ -201,7 +234,7 @@ public class XMLOutputter extends AnnotationOutputter {
     // add the coref graph
     //
     Map<Integer, CorefChain> corefChains =
-      annotation.get(CorefCoreAnnotations.CorefChainAnnotation.class);
+            annotation.get(CorefCoreAnnotations.CorefChainAnnotation.class);
     if (corefChains != null) {
       List<CoreMap> sentences = annotation.get(CoreAnnotations.SentencesAnnotation.class);
       Element corefInfo = new Element("coreference", NAMESPACE_URI);
@@ -217,13 +250,22 @@ public class XMLOutputter extends AnnotationOutputter {
   }
 
   /**
+   * Generates the XML content for a list of OpenIE triples.
+   */
+  private static void addTriples(Collection<RelationTriple> openieTriples, Element top, String namespaceUri) {
+    for (RelationTriple triple : openieTriples) {
+      top.appendChild(toXML(triple, namespaceUri));
+    }
+  }
+
+  /**
    * Generates the XML content for a constituent tree
    */
   private static void addConstituentTreeInfo(Element treeInfo, Tree tree, TreePrint constituentTreePrinter) {
     StringWriter treeStrWriter = new StringWriter();
     constituentTreePrinter.printTree(tree, new PrintWriter(treeStrWriter, true));
     String temp = treeStrWriter.toString();
-    //System.err.println(temp);
+    //log.info(temp);
     treeInfo.appendChild(temp);
   }
 
@@ -240,7 +282,7 @@ public class XMLOutputter extends AnnotationOutputter {
         int target = root.index();
         String sourceWord = "ROOT";
         String targetWord = tokens.get(target - 1).word();
-        boolean isExtra = false;
+        final boolean isExtra = false;
 
         addDependencyInfo(depInfo, rel, isExtra, source, sourceWord, null, target, targetWord, null, curNS);
       }
@@ -289,7 +331,7 @@ public class XMLOutputter extends AnnotationOutputter {
   }
 
   /**
-   * Generates the XML content for MachineReading entities
+   * Generates the XML content for MachineReading entities.
    */
   private static void addEntities(List<EntityMention> entities, Element top, String curNS) {
     for (EntityMention e: entities) {
@@ -299,11 +341,11 @@ public class XMLOutputter extends AnnotationOutputter {
   }
 
   /**
-   * Generates the XML content for MachineReading relations
+   * Generates the XML content for MachineReading relations.
    */
   private static void addRelations(List<RelationMention> relations, Element top, String curNS, double beam){
-    for(RelationMention r: relations){
-      if(r.printableObject(beam)) {
+    for (RelationMention r: relations){
+      if (r.printableObject(beam)) {
         Element re = toXML(r, curNS);
         top.appendChild(re);
       }
@@ -311,7 +353,7 @@ public class XMLOutputter extends AnnotationOutputter {
   }
 
   /**
-   * Generates the XML content for the coreference chain object
+   * Generates the XML content for the coreference chain object.
    */
   private static boolean addCorefGraphInfo
     (Options options, Element corefInfo, List<CoreMap> sentences, Map<Integer, CorefChain> corefChains, String curNS)
@@ -419,6 +461,18 @@ public class XMLOutputter extends AnnotationOutputter {
       wordInfo.appendChild(cur);
     }
 
+    if (token.containsKey(SentimentCoreAnnotations.SentimentClass.class)) {
+      Element cur = new Element("sentiment", curNS);
+      cur.appendChild(token.get(SentimentCoreAnnotations.SentimentClass.class));
+      wordInfo.appendChild(cur);
+    }
+
+    if (token.containsKey(CoreAnnotations.WikipediaEntityAnnotation.class)) {
+      Element cur = new Element("entitylink", curNS);
+      cur.appendChild(token.get(CoreAnnotations.WikipediaEntityAnnotation.class));
+      wordInfo.appendChild(cur);
+    }
+
 //    IntTuple corefDest;
 //    if((corefDest = label.get(CorefDestAnnotation.class)) != null){
 //      Element cur = new Element("coref", curNS);
@@ -444,6 +498,49 @@ public class XMLOutputter extends AnnotationOutputter {
       cur.appendChild(value);
       tokenElement.appendChild(cur);
     }
+  }
+
+  private static Element toXML(RelationTriple triple, String curNS) {
+    Element top = new Element("triple", curNS);
+    top.addAttribute(new Attribute("confidence", triple.confidenceGloss()));
+
+    // Create the subject
+    Element subject = new Element("subject", curNS);
+    subject.addAttribute(new Attribute("begin", Integer.toString(triple.subjectTokenSpan().first)));
+    subject.addAttribute(new Attribute("end", Integer.toString(triple.subjectTokenSpan().second)));
+    Element text = new Element("text", curNS);
+    text.appendChild(triple.subjectGloss());
+    Element lemma = new Element("lemma", curNS);
+    lemma.appendChild(triple.subjectLemmaGloss());
+    subject.appendChild(text);
+    subject.appendChild(lemma);
+    top.appendChild(subject);
+
+    // Create the relation
+    Element relation = new Element("relation", curNS);
+    relation.addAttribute(new Attribute("begin", Integer.toString(triple.relationTokenSpan().first)));
+    relation.addAttribute(new Attribute("end", Integer.toString(triple.relationTokenSpan().second)));
+    text = new Element("text", curNS);
+    text.appendChild(triple.relationGloss());
+    lemma = new Element("lemma", curNS);
+    lemma.appendChild(triple.relationLemmaGloss());
+    relation.appendChild(text);
+    relation.appendChild(lemma);
+    top.appendChild(relation);
+
+    // Create the object
+    Element object = new Element("object", curNS);
+    object.addAttribute(new Attribute("begin", Integer.toString(triple.objectTokenSpan().first)));
+    object.addAttribute(new Attribute("end", Integer.toString(triple.objectTokenSpan().second)));
+    text = new Element("text", curNS);
+    text.appendChild(triple.objectGloss());
+    lemma = new Element("lemma", curNS);
+    lemma.appendChild(triple.objectLemmaGloss());
+    object.appendChild(text);
+    object.appendChild(lemma);
+    top.appendChild(object);
+
+    return top;
   }
 
   private static Element toXML(EntityMention entity, String curNS) {
@@ -485,9 +582,9 @@ public class XMLOutputter extends AnnotationOutputter {
       top.appendChild(relation.getSubType());
     }
 
-    List<EntityMention> ents = relation.getEntityMentionArgs();
+    List<EntityMention> mentions = relation.getEntityMentionArgs();
     Element args = new Element("arguments", curNS);
-    for (EntityMention e : ents) {
+    for (EntityMention e : mentions) {
       args.appendChild(toXML(e, curNS));
     }
     top.appendChild(args);
@@ -513,8 +610,6 @@ public class XMLOutputter extends AnnotationOutputter {
     }
     return probs;
   }
-
-
 
 }
 

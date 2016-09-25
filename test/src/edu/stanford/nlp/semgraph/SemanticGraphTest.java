@@ -7,12 +7,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import edu.stanford.nlp.trees.*;
 import junit.framework.TestCase;
 import edu.stanford.nlp.ling.IndexedWord;
-import edu.stanford.nlp.trees.EnglishGrammaticalRelations;
-import edu.stanford.nlp.trees.LabeledScoredTreeFactory;
-import edu.stanford.nlp.trees.PennTreeReader;
-import edu.stanford.nlp.trees.Tree;
 import edu.stanford.nlp.util.Generics;
 
 /**
@@ -43,7 +40,7 @@ public class SemanticGraphTest extends TestCase {
       throw new RuntimeException(e);
     }
 
-    return SemanticGraphFactory.makeFromTree(tree, SemanticGraphFactory.Mode.BASIC, true, true);
+    return SemanticGraphFactory.makeFromTree(tree, SemanticGraphFactory.Mode.BASIC, GrammaticalStructure.Extras.MAXIMAL, true);
   }
 
   public void testShortestPath() {
@@ -141,28 +138,28 @@ public class SemanticGraphTest extends TestCase {
   }
 
   public void testTopologicalSort() {
-    SemanticGraph gr = SemanticGraph.valueOf("[ate subj:Bill dobj:[muffins nn:blueberry]]");
+    SemanticGraph gr = SemanticGraph.valueOf("[ate subj>Bill dobj>[muffins compound>blueberry]]");
     verifyTopologicalSort(gr);
 
     List<IndexedWord> vertices = gr.vertexListSorted();
-    gr.addEdge(vertices.get(1), vertices.get(2), EnglishGrammaticalRelations.DIRECT_OBJECT, 1.0, false);
+    gr.addEdge(vertices.get(1), vertices.get(2), UniversalEnglishGrammaticalRelations.DIRECT_OBJECT, 1.0, false);
     verifyTopologicalSort(gr);
 
-    gr = SemanticGraph.valueOf("[ate subj:Bill dobj:[muffins nn:blueberry]]");
+    gr = SemanticGraph.valueOf("[ate subj>Bill dobj>[muffins compound>blueberry]]");
     vertices = gr.vertexListSorted();
-    gr.addEdge(vertices.get(2), vertices.get(1), EnglishGrammaticalRelations.DIRECT_OBJECT, 1.0, false);
+    gr.addEdge(vertices.get(2), vertices.get(1), UniversalEnglishGrammaticalRelations.DIRECT_OBJECT, 1.0, false);
     verifyTopologicalSort(gr);
 
-    gr = SemanticGraph.valueOf("[ate subj:Bill dobj:[muffins nn:blueberry]]");
+    gr = SemanticGraph.valueOf("[ate subj>Bill dobj>[muffins compound>blueberry]]");
     vertices = gr.vertexListSorted();
-    gr.addEdge(vertices.get(1), vertices.get(3), EnglishGrammaticalRelations.DIRECT_OBJECT, 1.0, false);
+    gr.addEdge(vertices.get(1), vertices.get(3), UniversalEnglishGrammaticalRelations.DIRECT_OBJECT, 1.0, false);
     verifyTopologicalSort(gr);
 
     // now create a graph with a directed loop, which we should not
     // be able to topologically sort
-    gr = SemanticGraph.valueOf("[ate subj:Bill dobj:[muffins nn:blueberry]]");
+    gr = SemanticGraph.valueOf("[ate subj>Bill dobj>[muffins compound>blueberry]]");
     vertices = gr.vertexListSorted();
-    gr.addEdge(vertices.get(3), vertices.get(0), EnglishGrammaticalRelations.DIRECT_OBJECT, 1.0, false);
+    gr.addEdge(vertices.get(3), vertices.get(0), UniversalEnglishGrammaticalRelations.DIRECT_OBJECT, 1.0, false);
     try {
       verifyTopologicalSort(gr);
       throw new RuntimeException("Expected to fail");
@@ -229,14 +226,14 @@ public class SemanticGraphTest extends TestCase {
   public void testIsAncestor() {
     //System.err.println(graph.toString(CoreLabel.VALUE_TAG_INDEX_FORMAT));
     assertEquals(1, graph.isAncestor(graph.getNodeByIndex(42), graph.getNodeByIndex(45)));
-    assertEquals(2, graph.isAncestor(graph.getNodeByIndex(40), graph.getNodeByIndex(38)));
-    assertEquals(-1, graph.isAncestor(graph.getNodeByIndex(40), graph.getNodeByIndex(37)));
+    assertEquals(2, graph.isAncestor(graph.getNodeByIndex(40), graph.getNodeByIndex(37)));
+    assertEquals(-1, graph.isAncestor(graph.getNodeByIndex(40), graph.getNodeByIndex(38)));
     assertEquals(-1, graph.isAncestor(graph.getNodeByIndex(40), graph.getNodeByIndex(10)));
     assertEquals(-1, graph.isAncestor(graph.getNodeByIndex(45), graph.getNodeByIndex(42)));
   }
 
   public void testHasChildren() {
-    SemanticGraph gr = SemanticGraph.valueOf("[ate subj:Bill dobj:[muffins nn:blueberry]]");
+    SemanticGraph gr = SemanticGraph.valueOf("[ate subj>Bill dobj>[muffins compound>blueberry]]");
 
     List<IndexedWord> vertices = gr.vertexListSorted();
     for (IndexedWord word : vertices) {

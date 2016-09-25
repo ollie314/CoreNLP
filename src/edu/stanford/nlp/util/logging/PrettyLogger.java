@@ -2,7 +2,6 @@
 package edu.stanford.nlp.util.logging;
 
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Dictionary;
 import java.util.Enumeration;
 import java.util.LinkedList;
@@ -17,7 +16,7 @@ import edu.stanford.nlp.util.Generics;
  * objects in a reasonably structured way via Redwood logging. It has support
  * for many built in collection types (Mapping, Iterable, arrays, Properties) as
  * well as anything that implements PrettyLoggable.
- *  
+ *
  * @see PrettyLoggable
  * @author David McClosky
  * @author Gabor Angeli (+ primitive arrays; dictionaries)
@@ -26,7 +25,7 @@ import edu.stanford.nlp.util.Generics;
 // TODO Should have an optional maximum depth, perhaps
 
 public class PrettyLogger {
-  
+
   private static final RedwoodChannels DEFAULT_CHANNELS = new RedwoodChannels(Redwood.FORCE);
 
   /**
@@ -41,7 +40,7 @@ public class PrettyLogger {
   /**
    * Pretty log an object. It will be logged to the default channel. Its class
    * name will be used as a description.
-   * 
+   *
    * @param obj
    *          the object to be pretty logged
    */
@@ -167,22 +166,19 @@ public class PrettyLogger {
     Redwood.startTrack(description);
     if (mapping == null) {
       channels.log("(mapping is null)");
-    } else if (mapping.size() == 0) {
+    } else if (mapping.isEmpty()) {
       channels.log("(empty)");
     } else {
       // convert keys to sorted list, if possible
-      List<K> keys = new LinkedList<K>();
+      List<K> keys = new LinkedList<>();
       for (K key : mapping.keySet()) {
         keys.add(key);
       }
-      Collections.sort(keys, new Comparator<K>() {
-        @SuppressWarnings("unchecked")
-        public int compare(K a, K b) {
-          if (a != null && Comparable.class.isAssignableFrom(a.getClass())) {
-            return ((Comparable) a).compareTo(b);
-          } else {
-            return 0;
-          }
+      Collections.sort(keys, (a, b) -> {
+        if (a != null && Comparable.class.isAssignableFrom(a.getClass())) {
+          return ((Comparable) a).compareTo(b);
+        } else {
+          return 0;
         }
       });
       // log key/value pairs
@@ -281,4 +277,5 @@ public class PrettyLogger {
     }
     Redwood.endTrack(description);
   }
+
 }

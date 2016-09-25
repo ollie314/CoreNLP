@@ -12,9 +12,9 @@ import edu.stanford.nlp.pipeline.Annotation;
 import edu.stanford.nlp.pipeline.StanfordCoreNLP;
 import edu.stanford.nlp.semgraph.SemanticGraph;
 import edu.stanford.nlp.semgraph.SemanticGraphCoreAnnotations;
-import edu.stanford.nlp.trees.EnglishGrammaticalRelations;
 import edu.stanford.nlp.trees.GrammaticalRelation;
 import edu.stanford.nlp.trees.TypedDependency;
+import edu.stanford.nlp.trees.UniversalEnglishGrammaticalRelations;
 import edu.stanford.nlp.util.CoreMap;
 import edu.stanford.nlp.util.PropertiesUtils;
 import junit.framework.TestCase;
@@ -32,7 +32,7 @@ import static org.junit.matchers.JUnitMatchers.hasItem;
  */
 public class DependencyParserITest extends TestCase {
 
-  private static final double EnglishSdLas = 89.58544553340093;
+  private static final double EnglishSdLas = 89.46997859637266;
 
   /**
    * Test that the NN dependency parser performance doesn't change.
@@ -40,9 +40,23 @@ public class DependencyParserITest extends TestCase {
   public void testDependencyParserEnglishSD() {
     DependencyParser parser = new DependencyParser();
     parser.loadModelFile("/u/nlp/data/depparser/nn/distrib-2014-10-26/PTB_Stanford_params.txt.gz");
-    double las = parser.testCoNLL("/u/nlp/data/depparser/nn/data/dependency_treebanks/PTB_Stanford/3.3.0/dev.conll", null);
+    double las = parser.testCoNLL("/u/nlp/data/depparser/nn/data/dependency_treebanks/PTB/Stanford_3_3_0/dev.conll", null);
     assertEquals(String.format("English SD LAS should be %.2f but was %.2f",
             EnglishSdLas, las), EnglishSdLas, las, 1e-4);
+  }
+
+  // Lower because we're evaluating on PTB + extraDevTest, not just PTB
+  private static final double EnglishUdLas = 88.72648417258083;
+
+  /**
+   * Test that the NN dependency parser performance doesn't change.
+   */
+  public void testDependencyParserEnglishUD() {
+    DependencyParser parser = new DependencyParser();
+    parser.loadModelFile("/u/nlp/data/depparser/nn/distrib-2015-04-16/english_UD.gz");
+    double las = parser.testCoNLL("/u/nlp/data/depparser/nn/data/dependency_treebanks/UD-converted/dev.conll", null);
+    assertEquals(String.format("English UD LAS should be %.2f but was %.2f",
+        EnglishUdLas, las), EnglishUdLas, las, 1e-4);
   }
 
   private static final double EnglishConll2008Las = 90.97206578058122;
@@ -53,7 +67,7 @@ public class DependencyParserITest extends TestCase {
   public void testDependencyParserEnglishCoNLL2008() {
     DependencyParser parser = new DependencyParser();
     parser.loadModelFile("/u/nlp/data/depparser/nn/distrib-2014-10-26/PTB_CoNLL_params.txt.gz");
-    double las = parser.testCoNLL("/u/nlp/data/depparser/nn/data/dependency_treebanks/PTB_CoNLL/dev.conll", null);
+    double las = parser.testCoNLL("/u/nlp/data/depparser/nn/data/dependency_treebanks/PTB/CoNLL/dev.conll", null);
     assertEquals(String.format("English CoNLL2008 LAS should be %.2f but was %.2f",
             EnglishConll2008Las, las), EnglishConll2008Las, las, 1e-4);
   }
@@ -67,7 +81,7 @@ public class DependencyParserITest extends TestCase {
     Properties props = StringUtils.stringToProperties("language=Chinese");
     DependencyParser parser = new DependencyParser(props);
     parser.loadModelFile("/u/nlp/data/depparser/nn/distrib-2014-10-26/CTB_CoNLL_params.txt.gz");
-    double las = parser.testCoNLL("/u/nlp/data/depparser/nn/data/dependency_treebanks/CTB/dev.gold.conll", null);
+    double las = parser.testCoNLL("/u/nlp/data/depparser/nn/data/dependency_treebanks/CTB/ctb5.1/dev.gold.conll", null);
     assertEquals(String.format("Chinese CoNLLX gold tags LAS should be %.2f but was %.2f",
             ChineseConllxGoldTagsLas, las), ChineseConllxGoldTagsLas, las, 1e-4);
   }
@@ -89,9 +103,8 @@ public class DependencyParserITest extends TestCase {
                                             SemanticGraphCoreAnnotations.CollapsedCCProcessedDependenciesAnnotation.class);
     Collection<TypedDependency> dependencies = ccProcessed.typedDependencies();
 
-    GrammaticalRelation expected = EnglishGrammaticalRelations.getConj("and");
-    assertThat(dependencies.stream().map(TypedDependency::reln).collect(toList()),
-            hasItem(expected));
+    GrammaticalRelation expected = UniversalEnglishGrammaticalRelations.getConj("and");
+    assertTrue(dependencies.stream().map(TypedDependency::reln).collect(toList()).contains(expected));
   }
 
   /**

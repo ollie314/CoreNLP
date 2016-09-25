@@ -1,4 +1,5 @@
-package edu.stanford.nlp.sentiment;
+package edu.stanford.nlp.sentiment; 
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.StringReader;
 import java.util.List;
@@ -17,7 +18,17 @@ import edu.stanford.nlp.trees.Trees;
 import edu.stanford.nlp.util.Generics;
 import edu.stanford.nlp.util.Pair;
 
-public class BuildBinarizedDataset {
+/**
+ * @author John Bauer
+ * @author Richard Socher
+ */
+public class BuildBinarizedDataset  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(BuildBinarizedDataset.class);
+
+  private BuildBinarizedDataset() {} // static methods only
+
   /**
    * Sets all of the labels on a tree to the given default value.
    */
@@ -31,7 +42,7 @@ public class BuildBinarizedDataset {
     }
 
     tree.label().setValue(defaultLabel.toString());
-  }  
+  }
 
   public static void setPredictedLabels(Tree tree) {
     if (tree.isLeaf()) {
@@ -44,7 +55,7 @@ public class BuildBinarizedDataset {
 
     tree.label().setValue(Integer.toString(RNNCoreAnnotations.getPredictedClass(tree)));
   }
-  
+
   public static void extractLabels(Map<Pair<Integer, Integer>, String> spanToLabels, List<HasWord> tokens, String line) {
     String[] pieces = line.trim().split("\\s+");
     if (pieces.length == 0) {
@@ -52,11 +63,10 @@ public class BuildBinarizedDataset {
     }
     if (pieces.length == 1) {
       String error = "Found line with label " + line + " but no tokens to associate with that line";
-      System.err.println(error);
       throw new RuntimeException(error);
     }
 
-    //TODO: BUG: The pieces are tokenized differently than the splitting, e.g. on possessive markers as in "actors' expenses" 
+    //TODO: BUG: The pieces are tokenized differently than the splitting, e.g., on possessive markers as in "actors' expenses"
     for (int i = 0; i < tokens.size() - pieces.length + 2; ++i) {
       boolean found = true;
       for (int j = 1; j < pieces.length; ++j) {
@@ -66,7 +76,7 @@ public class BuildBinarizedDataset {
         }
       }
       if (found) {
-        spanToLabels.put(new Pair<Integer, Integer>(i, i + pieces.length - 1), pieces[0]);
+        spanToLabels.put(new Pair<>(i, i + pieces.length - 1), pieces[0]);
       }
     }
   }
@@ -76,8 +86,8 @@ public class BuildBinarizedDataset {
       throw new AssertionError("Expected CoreLabels");
     }
     CoreLabel label = (CoreLabel) tree.label();
-    if (label.get(CoreAnnotations.BeginIndexAnnotation.class) == span.first &&
-        label.get(CoreAnnotations.EndIndexAnnotation.class) == span.second) {
+    if (label.get(CoreAnnotations.BeginIndexAnnotation.class).equals(span.first) &&
+        label.get(CoreAnnotations.EndIndexAnnotation.class).equals(span.second)) {
       label.setValue(value);
       return true;
     }
@@ -98,9 +108,9 @@ public class BuildBinarizedDataset {
    * the treebank used in the Sentiment project.
    * <br>
    * The expected input file is one sentence per line, with sentences
-   * separated by blank lines. The first line has the main label of the sentence together with the full sentence. 
+   * separated by blank lines. The first line has the main label of the sentence together with the full sentence.
    * Lines after the first sentence line but before
-   * the blank line will be treated as labeled subphrases.  The
+   * the blank line will be treated as labeled sub-phrases.  The
    * labels should start with the label and then contain a list of
    * tokens the label applies to. All phrases that do not have their own label will take on the main sentence label!
    *  For example:
@@ -142,7 +152,7 @@ public class BuildBinarizedDataset {
         sentimentModelPath = args[argIndex + 1];
         argIndex += 2;
       } else {
-        System.err.println("Unknown argument " + args[argIndex]);
+        log.info("Unknown argument " + args[argIndex]);
         System.exit(2);
       }
     }
@@ -162,7 +172,7 @@ public class BuildBinarizedDataset {
     String[] chunks = text.split("\\n\\s*\\n+"); // need blank line to make a new chunk
 
     for (String chunk : chunks) {
-      if (chunk.trim() == "") {
+      if (chunk.trim().isEmpty()) {
         continue;
       }
       // The expected format is that line 0 will be the text of the
@@ -179,7 +189,7 @@ public class BuildBinarizedDataset {
       Integer mainLabel = new Integer(tokens.get(0).word());
       //System.out.print("Main Sentence Label: " + mainLabel.toString() + "; ");
       tokens = tokens.subList(1, tokens.size());
-      //System.err.println(tokens);
+      //log.info(tokens);
 
       Map<Pair<Integer, Integer>, String> spanToLabels = Generics.newHashMap();
       for (int i = 1; i < lines.length; ++i) {
@@ -206,12 +216,13 @@ public class BuildBinarizedDataset {
       Trees.convertToCoreLabels(collapsedUnary);
       collapsedUnary.indexSpans();
 
-      for (Pair<Integer, Integer> span : spanToLabels.keySet()) {
-        setSpanLabel(collapsedUnary, span, spanToLabels.get(span));
+      for (Map.Entry<Pair<Integer, Integer>, String> pairStringEntry : spanToLabels.entrySet()) {
+        setSpanLabel(collapsedUnary, pairStringEntry.getKey(), pairStringEntry.getValue());
       }
 
       System.out.println(collapsedUnary);
       //System.out.println();
     }
-  }
+  } // end main
+
 }

@@ -1,6 +1,7 @@
 package edu.stanford.nlp.io;
 
 import edu.stanford.nlp.util.*;
+import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
@@ -10,23 +11,29 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.nio.channels.FileChannel;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
+
 /**
  * Helper Class for various I/O related things.
  *
- * @author Kayur Patel, Teg Grenager
+ * @author Kayur Patel
+ * @author Teg Grenager
+ * @author Christopher Manning
  */
 
-public class IOUtils {
+public class IOUtils  {
 
-  private static final int SLURP_BUFFER_SIZE = 16000;
-  private static final int GZIP_FILE_BUFFER_SIZE = 65536;
+  private static final int SLURP_BUFFER_SIZE = 16384;
 
-  public static final String eolChar = System.getProperty("line.separator");
+  public static final String eolChar = System.lineSeparator();  // todo: Inline
   public static final String defaultEncoding = "utf-8";
+
+  /** A logger for this class */
+  private static final Redwood.RedwoodChannels logger = Redwood.channels(IOUtils.class);
 
   // A class of static methods
   private IOUtils() { }
@@ -96,7 +103,7 @@ public class IOUtils {
       oos.writeObject(o);
       oos.close();
     } catch (Exception e) {
-      e.printStackTrace();
+      logger.err(throwableToStackTrace(e));
     } finally {
       closeIgnoringExceptions(oos);
     }
@@ -130,8 +137,8 @@ public class IOUtils {
     try {
       return writeObjectToTempFile(o, filename);
     } catch (Exception e) {
-      System.err.println("Error writing object to file " + filename);
-      e.printStackTrace();
+      logger.error("Error writing object to file " + filename);
+      logger.err(throwableToStackTrace(e));
       return null;
     }
   }
@@ -185,9 +192,9 @@ public class IOUtils {
       }
       writer.write(contents.getBytes(encoding));
     } catch (Exception e) {
-      e.printStackTrace();
+      logger.err(throwableToStackTrace(e));
     } finally {
-      if(writer != null){ closeIgnoringExceptions(writer); }
+      closeIgnoringExceptions(writer);
     }
   }
 
@@ -243,7 +250,7 @@ public class IOUtils {
       }
       writer.write(contents.getBytes(encoding));
     } catch (Exception e) {
-      e.printStackTrace();
+      logger.err(throwableToStackTrace(e));
     } finally {
       closeIgnoringExceptions(writer);
     }
@@ -313,6 +320,18 @@ public class IOUtils {
     return ErasureUtils.uncheckedCast(o);
   }
 
+  public static <T> T readObjectAnnouncingTimingFromURLOrClasspathOrFileSystem(Redwood.RedwoodChannels log, String msg, String path) {
+    T obj;
+    try {
+      Timing timing = new Timing();
+      obj = IOUtils.readObjectFromURLOrClasspathOrFileSystem(path);
+      log.info(msg + ' ' + path + " ... done [" + timing.toSecondsString() + " sec].");
+    } catch (IOException | ClassNotFoundException e) {
+      throw new RuntimeIOException(e);
+    }
+    return obj;
+  }
+
   public static <T> T readObjectFromObjectStream(ObjectInputStream ois) throws IOException,
           ClassNotFoundException {
     Object o = ois.readObject();
@@ -345,10 +364,8 @@ public class IOUtils {
               new GZIPInputStream(new FileInputStream(file))));
       o = ois.readObject();
       ois.close();
-    } catch (IOException e) {
-      e.printStackTrace();
-    } catch (ClassNotFoundException e) {
-      e.printStackTrace();
+    } catch (IOException | ClassNotFoundException e) {
+      logger.err(throwableToStackTrace(e));
     }
     return ErasureUtils.uncheckedCast(o);
   }
@@ -384,6 +401,8 @@ public class IOUtils {
 
   /**
    * Locates this file either in the CLASSPATH or in the file system. The CLASSPATH takes priority.
+   * Note that this method uses the ClassLoader methods, so that classpath resources must be specified as
+   * absolute resource paths without a leading "/".
    *
    * @param name The file or resource name
    * @throws FileNotFoundException If the file does not exist
@@ -397,9 +416,15 @@ public class IOUtils {
     // windows File.separator is \, but getting resources only works with /
     if (is == null) {
       is = IOUtils.class.getClassLoader().getResourceAsStream(name.replaceAll("\\\\", "/"));
+      // Classpath doesn't like double slashes (e.g., /home/user//foo.txt)
+      if (is == null) {
+        is = IOUtils.class.getClassLoader().getResourceAsStream(name.replaceAll("\\\\", "/").replaceAll("/+", "/"));
+      }
     }
     // if not found in the CLASSPATH, load from the file system
-    if (is == null) is = new FileInputStream(name);
+    if (is == null) {
+      is = new FileInputStream(name);
+    }
     return is;
   }
 
@@ -413,6 +438,9 @@ public class IOUtils {
     InputStream is = IOUtils.class.getClassLoader().getResourceAsStream(name);
     if (is == null) {
       is = IOUtils.class.getClassLoader().getResourceAsStream(name.replaceAll("\\\\", "/"));
+      if (is == null) {
+        is = IOUtils.class.getClassLoader().getResourceAsStream(name.replaceAll("\\\\", "/").replaceAll("/+", "/"));
+      }
     }
     return is != null || new File(name).exists();
   }
@@ -422,15 +450,17 @@ public class IOUtils {
    * The CLASSPATH takes priority over the file system!
    * This stream is buffered and gunzipped (if necessary).
    *
-   * @param textFileOrUrl
+   * @param textFileOrUrl The String specifying the URL/resource/file to load
    * @return An InputStream for loading a resource
-   * @throws IOException
+   * @throws IOException On any IO error
+   * @throws NullPointerException Input parameter is null
    */
   public static InputStream getInputStreamFromURLOrClasspathOrFileSystem(String textFileOrUrl)
-    throws IOException
-  {
+          throws IOException, NullPointerException {
     InputStream in;
-    if (textFileOrUrl.matches("https?://.*")) {
+    if (textFileOrUrl == null) {
+      throw new NullPointerException("Attempt to open file with null name");
+    } else if (textFileOrUrl.matches("https?://.*")) {
       URL u = new URL(textFileOrUrl);
       URLConnection uc = u.openConnection();
       in = uc.getInputStream();
@@ -444,27 +474,33 @@ public class IOUtils {
           URLConnection uc = u.openConnection();
           in = uc.getInputStream();
         } catch (IOException e2) {
-          // Don't make the original exception a cause, since it is almost certainly bogus
-          throw new IOException("Unable to resolve \"" +
-                  textFileOrUrl + "\" as either " +
-                  "class path, filename or URL"); // , e2);
+          // Don't make the original exception a cause, since it is usually bogus
+          throw new IOException("Unable to open \"" +
+                  textFileOrUrl + "\" as " + "class path, filename or URL"); // , e2);
         }
       }
     }
 
+    // If it is a GZIP stream then ungzip it
     if (textFileOrUrl.endsWith(".gz")) {
-      // gunzip it if necessary
-      in = new GZIPInputStream(in, GZIP_FILE_BUFFER_SIZE);
+      try {
+        in = new GZIPInputStream(in);
+      } catch (Exception e) {
+        throw new RuntimeIOException("Resource or file looks like a gzip file, but is not: " + textFileOrUrl, e);
+      }
     }
 
     // buffer this stream.  even gzip streams benefit from buffering,
-    // such as for the shift reduce parser
+    // such as for the shift reduce parser [cdm 2016: I think this is only because default buffer is small; see below]
     in = new BufferedInputStream(in);
 
     return in;
   }
 
 
+  // todo [cdm 2015]: I think GZIPInputStream has its own buffer and so we don't need to buffer in that case.
+  // todo: Though it's default size is 512 bytes so need to make 8K in constructor. Or else buffering outside gzip is faster
+  // todo: final InputStream is = new GZIPInputStream( new FileInputStream( file ), 65536 );
   /**
    * Quietly opens a File. If the file ends with a ".gz" extension,
    * automatically opens a GZIPInputStream to wrap the constructed
@@ -536,9 +572,8 @@ public class IOUtils {
    * Open a BufferedReader on stdin. Use the user's default encoding.
    *
    * @return The BufferedReader
-   * @throws IOException If there is an I/O problem
    */
-  public static BufferedReader readerFromStdin() throws IOException {
+  public static BufferedReader readerFromStdin() {
     return new BufferedReader(new InputStreamReader(System.in));
   }
 
@@ -558,6 +593,7 @@ public class IOUtils {
   }
 
 
+  // TODO [cdm 2015]: Should we rename these methods. Sort of misleading: They really read files, resources, etc. specified by a String
   /**
    * Open a BufferedReader to a file, class path entry or URL specified by a String name.
    * If the String starts with https?://, then it is first tried as a URL. It
@@ -566,6 +602,8 @@ public class IOUtils {
    * file accessible by URL. If the String ends in .gz, it
    * is interpreted as a gzipped file (and uncompressed). The file is then
    * interpreted as a utf-8 text file.
+   * Note that this method uses the ClassLoader methods, so that classpath resources must be specified as
+   * absolute resource paths without a leading "/".
    *
    * @param textFileOrUrl What to read from
    * @return The BufferedReader
@@ -705,7 +743,7 @@ public class IOUtils {
 
     private InputStream getStream() throws IOException {
       if (file != null) {
-        return new FileInputStream(file);
+        return inputStreamFromFile(file);
       } else if (path != null) {
         return getInputStreamFromURLOrClasspathOrFileSystem(path);
       } else {
@@ -847,22 +885,22 @@ public class IOUtils {
    * Line endings are: \r\n,\n,\r
    * Lines returns by this iterator will include the eol-characters
    **/
-  private static final class EolPreservingLineReaderIterable implements Iterable<String>
-  {
+  private static final class EolPreservingLineReaderIterable implements Iterable<String> {
+
     private final Reader reader;
     private final int bufferSize;
+
     private EolPreservingLineReaderIterable( Reader reader )
     {
       this(reader, SLURP_BUFFER_SIZE);
     }
-    private EolPreservingLineReaderIterable( Reader reader, int bufferSize )
-    {
+    private EolPreservingLineReaderIterable( Reader reader, int bufferSize ) {
       this.reader = reader;
       this.bufferSize = bufferSize;
     }
+
     @Override
-    public Iterator<String> iterator()
-    {
+    public Iterator<String> iterator() {
       return new Iterator<String>() {
         private String next;
         private boolean done = false;
@@ -934,7 +972,6 @@ public class IOUtils {
           return false;
         }
 
-
         @Override
         public boolean hasNext()
         {
@@ -947,6 +984,7 @@ public class IOUtils {
           }
           return !done;
         }
+
         @Override
         public String next()
         {
@@ -962,13 +1000,14 @@ public class IOUtils {
           throw new UnsupportedOperationException();
         }
       };
-    }
-  }
+    } // end iterator()
+
+  } // end static class EolPreservingLineReaderIterable
 
   /**
    * Provides an implementation of closing a file for use in a finally block so
    * you can correctly close a file without even more exception handling stuff.
-   * From a suggestion in a talk by Josh Bloch.
+   * From a suggestion in a talk by Josh Bloch. Calling close() will flush().
    *
    * @param c The IO resource to close (e.g., a Stream/Reader)
    */
@@ -985,8 +1024,7 @@ public class IOUtils {
   /**
    * Iterate over all the files in the directory, recursively.
    *
-   * @param dir
-   *          The root directory.
+   * @param dir The root directory.
    * @return All files within the directory.
    */
   public static Iterable<File> iterFilesRecursive(final File dir) {
@@ -996,10 +1034,8 @@ public class IOUtils {
   /**
    * Iterate over all the files in the directory, recursively.
    *
-   * @param dir
-   *          The root directory.
-   * @param ext
-   *          A string that must be at the end of all files (e.g. ".txt")
+   * @param dir The root directory.
+   * @param ext A string that must be at the end of all files (e.g. ".txt")
    * @return All files within the directory ending in the given extension.
    */
   public static Iterable<File> iterFilesRecursive(final File dir,
@@ -1010,10 +1046,8 @@ public class IOUtils {
   /**
    * Iterate over all the files in the directory, recursively.
    *
-   * @param dir
-   *          The root directory.
-   * @param pattern
-   *          A regular expression that the file path must match. This uses
+   * @param dir The root directory.
+   * @param pattern A regular expression that the file path must match. This uses
    *          Matcher.find(), so use ^ and $ to specify endpoints.
    * @return All files within the directory.
    */
@@ -1022,7 +1056,7 @@ public class IOUtils {
     return new Iterable<File>() {
       public Iterator<File> iterator() {
         return new AbstractIterator<File>() {
-          private final Queue<File> files = new LinkedList<File>(Collections
+          private final Queue<File> files = new LinkedList<>(Collections
                   .singleton(dir));
           private File file = this.findNext();
 
@@ -1062,14 +1096,16 @@ public class IOUtils {
   }
 
   /**
-   * Returns all the text in the given File.
+   * Returns all the text in the given File as a single String.
+   * If the file's name ends in .gz, it is assumed to be gzipped and is silently uncompressed.
    */
   public static String slurpFile(File file) throws IOException {
     return slurpFile(file, null);
   }
 
   /**
-   * Returns all the text in the given File.
+   * Returns all the text in the given File as a single String.
+   * If the file's name ends in .gz, it is assumed to be gzipped and is silently uncompressed.
    *
    * @param file The file to read from
    * @param encoding The character encoding to assume.  This may be null, and
@@ -1077,11 +1113,11 @@ public class IOUtils {
    */
   public static String slurpFile(File file, String encoding) throws IOException {
     return IOUtils.slurpReader(IOUtils.encodedInputStreamReader(
-            new FileInputStream(file), encoding));
+            inputStreamFromFile(file), encoding));
   }
 
   /**
-   * Returns all the text in the given File.
+   * Returns all the text in the given File as a single String.
    */
   public static String slurpGZippedFile(String filename) throws IOException {
     Reader r = encodedInputStreamReader(new GZIPInputStream(new FileInputStream(
@@ -1090,7 +1126,7 @@ public class IOUtils {
   }
 
   /**
-   * Returns all the text in the given File.
+   * Returns all the text in the given File as a single String.
    */
   public static String slurpGZippedFile(File file) throws IOException {
     Reader r = encodedInputStreamReader(new GZIPInputStream(new FileInputStream(
@@ -1100,10 +1136,11 @@ public class IOUtils {
 
   /**
    * Returns all the text in the given file with the given encoding.
+   * The string may be empty, if the file is empty.
    */
   public static String slurpFile(String filename, String encoding)
           throws IOException {
-    Reader r = new InputStreamReader(getInputStreamFromURLOrClasspathOrFileSystem(filename), encoding);
+    Reader r = readerFromString(filename, encoding);
     return IOUtils.slurpReader(r);
   }
 
@@ -1134,18 +1171,11 @@ public class IOUtils {
   /**
    * Returns all the text at the given URL.
    */
-  public static String slurpGBURL(URL u) throws IOException {
-    return IOUtils.slurpURL(u, "GB18030");
-  }
-
-  /**
-   * Returns all the text at the given URL.
-   */
   public static String slurpURLNoExceptions(URL u, String encoding) {
     try {
       return IOUtils.slurpURL(u, encoding);
     } catch (Exception e) {
-      e.printStackTrace();
+      logger.err(throwableToStackTrace(e));
       return null;
     }
   }
@@ -1154,21 +1184,20 @@ public class IOUtils {
    * Returns all the text at the given URL.
    */
   public static String slurpURL(URL u, String encoding) throws IOException {
-    String lineSeparator = System.getProperty("line.separator");
+    String lineSeparator = System.lineSeparator();
     URLConnection uc = u.openConnection();
     uc.setReadTimeout(30000);
     InputStream is;
     try {
       is = uc.getInputStream();
     } catch (SocketTimeoutException e) {
-      // e.printStackTrace();
-      System.err.println("Time out. Return empty string");
+      logger.error("Socket time out; returning empty string.");
+      logger.err(throwableToStackTrace(e));
       return "";
     }
     BufferedReader br = new BufferedReader(new InputStreamReader(is, encoding));
-    String temp;
     StringBuilder buff = new StringBuilder(SLURP_BUFFER_SIZE); // make biggish
-    while ((temp = br.readLine()) != null) {
+    for (String temp; (temp = br.readLine()) != null; ) {
       buff.append(temp);
       buff.append(lineSeparator);
     }
@@ -1216,7 +1245,7 @@ public class IOUtils {
     try {
       return slurpURL(u);
     } catch (Exception e) {
-      e.printStackTrace();
+      logger.err(throwableToStackTrace(e));
       return null;
     }
   }
@@ -1231,13 +1260,13 @@ public class IOUtils {
   /**
    * Returns all the text at the given URL. If the file cannot be read
    * (non-existent, etc.), then and only then the method returns
-   * <code>null</code>.
+   * {@code null}.
    */
   public static String slurpURLNoExceptions(String path) {
     try {
       return slurpURL(path);
     } catch (Exception e) {
-      e.printStackTrace();
+      logger.err(throwableToStackTrace(e));
       return null;
     }
   }
@@ -1298,12 +1327,19 @@ public class IOUtils {
   }
 
   /**
+   * Read the contents of an input stream, decoding it according to the given character encoding.
+   * @param input The input stream to read from
+   * @return The String representation of that input stream
+   */
+  public static String slurpInputStream(InputStream input, String encoding) throws IOException {
+    return slurpReader(encodedInputStreamReader(input, encoding));
+  }
+
+  /**
    * Send all bytes from the input stream to the output stream.
    *
-   * @param input
-   *          The input bytes.
-   * @param output
-   *          Where the bytes should be written.
+   * @param input The input bytes.
+   * @param output Where the bytes should be written.
    */
   public static void writeStreamToStream(InputStream input, OutputStream output)
           throws IOException {
@@ -1330,7 +1366,7 @@ public class IOUtils {
     String[] labels = null;
     List<Map<String,String>> rows = Generics.newArrayList();
     for (String line : IOUtils.readLines(path)) {
-      System.out.println("Splitting "+line);
+      // logger.info("Splitting "+line);
       if (labels == null) {
         labels = StringUtils.splitOnCharWithQuoting(line,',','"',escapeChar);
       } else {
@@ -1358,7 +1394,7 @@ public class IOUtils {
     //--Variables
     StringBuilder[] buffer = new StringBuilder[numColumns];
     buffer[0] = new StringBuilder();
-    LinkedList<String[]> lines = new LinkedList<String[]>();
+    LinkedList<String[]> lines = new LinkedList<>();
     //--State
     boolean inQuotes = false;
     boolean nextIsEscaped = false;
@@ -1454,22 +1490,27 @@ public class IOUtils {
     return out;
   }
 
+  public static OutputStream getFileOutputStream(String filename, boolean append) throws IOException {
+    OutputStream out = new FileOutputStream(filename, append);
+    if (filename.endsWith(".gz")) {
+      out = new GZIPOutputStream(out);
+    } else if (filename.endsWith(".bz2")) {
+      //out = new CBZip2OutputStream(out);
+      out = getBZip2PipedOutputStream(filename);
+    }
+    return out;
+  }
+
+  /** @deprecated Just call readerFromString(filename) */
+  @Deprecated
   public static BufferedReader getBufferedFileReader(String filename) throws IOException {
-    return getBufferedFileReader(filename, defaultEncoding);
+    return readerFromString(filename, defaultEncoding);
   }
 
-  public static BufferedReader getBufferedFileReader(String filename, String encoding) throws IOException {
-    InputStream in = getFileInputStream(filename);
-    return new BufferedReader(new InputStreamReader(in, encoding));
-  }
-
+  /** @deprecated Just call readerFromString(filename) */
+  @Deprecated
   public static BufferedReader getBufferedReaderFromClasspathOrFileSystem(String filename) throws IOException {
-    return getBufferedReaderFromClasspathOrFileSystem(filename, defaultEncoding);
-  }
-
-  public static BufferedReader getBufferedReaderFromClasspathOrFileSystem(String filename, String encoding) throws IOException {
-    InputStream in = findStreamInClasspathOrFileSystem(filename);
-    return new BufferedReader(new InputStreamReader(in, encoding));
+    return readerFromString(filename, defaultEncoding);
   }
 
   public static PrintWriter getPrintWriter(File textFile) throws IOException {
@@ -1512,21 +1553,19 @@ public class IOUtils {
     return new PrintWriter(new BufferedWriter(new OutputStreamWriter(out, encoding)), true);
   }
 
-  public static InputStream getBZip2PipedInputStream(String filename) throws IOException
-  {
+  public static InputStream getBZip2PipedInputStream(String filename) throws IOException {
     String bzcat = System.getProperty("bzcat", "bzcat");
     Runtime rt = Runtime.getRuntime();
     String cmd = bzcat + " " + filename;
-    //System.err.println("getBZip2PipedInputStream: Running command: "+cmd);
+    //log.info("getBZip2PipedInputStream: Running command: "+cmd);
     Process p = rt.exec(cmd);
     Writer errWriter = new BufferedWriter(new OutputStreamWriter(System.err));
-    StreamGobbler errGobler = new StreamGobbler(p.getErrorStream(), errWriter);
-    errGobler.start();
+    StreamGobbler errGobbler = new StreamGobbler(p.getErrorStream(), errWriter);
+    errGobbler.start();
     return p.getInputStream();
   }
 
-  public static OutputStream getBZip2PipedOutputStream(String filename) throws IOException
-  {
+  public static OutputStream getBZip2PipedOutputStream(String filename) throws IOException {
     return new BZip2PipedOutputStream(filename);
   }
 
@@ -1538,12 +1577,11 @@ public class IOUtils {
    * @return a set of the entries in column field
    * @throws IOException
    */
-  public static Set<String> readColumnSet(String infile, int field) throws IOException
-  {
+  public static Set<String> readColumnSet(String infile, int field) throws IOException {
     BufferedReader br = IOUtils.getBufferedFileReader(infile);
-    String line;
+
     Set<String> set = Generics.newHashSet();
-    while ((line = br.readLine()) != null) {
+    for (String line; (line = br.readLine()) != null; ) {
       line = line.trim();
       if (line.length() > 0) {
         if (field < 0) {
@@ -1565,10 +1603,9 @@ public class IOUtils {
           NoSuchFieldException, NoSuchMethodException, InvocationTargetException
   {
     Pattern delimiterPattern = Pattern.compile(delimiter);
-    List<C> list = new ArrayList<C>();
+    List<C> list = new ArrayList<>();
     BufferedReader br = IOUtils.getBufferedFileReader(filename);
-    String line;
-    while ((line = br.readLine()) != null) {
+    for (String line; (line = br.readLine()) != null; ) {
       line = line.trim();
       if (line.length() > 0) {
         C item = StringUtils.columnStringToObject(objClass, line, delimiterPattern, fieldNames);
@@ -1579,13 +1616,12 @@ public class IOUtils {
     return list;
   }
 
-  public static Map<String,String> readMap(String filename) throws IOException
-  {
+  public static Map<String,String> readMap(String filename) throws IOException {
     Map<String,String> map = Generics.newHashMap();
     try {
       BufferedReader br = IOUtils.getBufferedFileReader(filename);
-      String line;
-      while ((line = br.readLine()) != null) {
+
+      for (String line; (line = br.readLine()) != null; ) {
         String[] fields = tab.split(line,2);
         map.put(fields[0], fields[1]);
       }
@@ -1611,6 +1647,7 @@ public class IOUtils {
    * empty, if the file is empty.  If there is an IOException, it is caught
    * and null is returned.  Encoding can also be specified.
    */
+  // todo: This is same as slurpFile (!)
   public static String stringFromFile(String filename, String encoding) {
     try {
       StringBuilder sb = new StringBuilder();
@@ -1624,7 +1661,7 @@ public class IOUtils {
       return sb.toString();
     }
     catch (IOException e) {
-      e.printStackTrace();
+      logger.err(throwableToStackTrace(e));
       return null;
     }
   }
@@ -1650,8 +1687,8 @@ public class IOUtils {
 
   public static List<String> linesFromFile(String filename,String encoding, boolean ignoreHeader) {
     try {
-      List<String> lines = new ArrayList<String>();
-      BufferedReader in = new BufferedReader(new EncodingFileReader(filename,encoding));
+      List<String> lines = new ArrayList<>();
+      BufferedReader in = readerFromString(filename, encoding);
       String line;
       int i = 0;
       while ((line = in.readLine()) != null) {
@@ -1664,29 +1701,9 @@ public class IOUtils {
       return lines;
     }
     catch (IOException e) {
-      e.printStackTrace();
+      logger.err(throwableToStackTrace(e));
       return null;
     }
-  }
-
-  public static String backupName(String filename) {
-    return backupFile(new File(filename)).toString();
-  }
-
-  public static File backupFile(File file) {
-    int max = 1000;
-    String filename = file.toString();
-    File backup = new File(filename + "~");
-    if (!backup.exists()) { return backup; }
-    for (int i = 1; i <= max; i++) {
-      backup = new File(filename + ".~" + i + ".~");
-      if (!backup.exists()) { return backup; }
-    }
-    return null;
-  }
-
-  public static boolean renameToBackupName(File file) {
-    return file.renameTo(backupFile(file));
   }
 
 
@@ -1728,8 +1745,8 @@ public class IOUtils {
 
   /**
    * Given a filepath, delete all files in the directory recursively
-   * @param dir
-   * @return
+   * @param dir Directory from which to delete files
+   * @return {@code true} if the deletion is successful, {@code false} otherwise
    */
   public static boolean deleteDirRecursively(File dir) {
     if (dir.isDirectory()) {
@@ -1811,7 +1828,7 @@ public class IOUtils {
 
   /**
    * A raw file copy function -- this is not public since no error checks are made as to the
-   * consistency of the filed being copied. Use instead:
+   * consistency of the file being copied. Use instead:
    * @see IOUtils#cp(java.io.File, java.io.File, boolean)
    * @param source The source file. This is guaranteed to exist, and is guaranteed to be a file.
    * @param target The target file.
@@ -1927,8 +1944,8 @@ public class IOUtils {
     // Variables
     RandomAccessFile raf = new RandomAccessFile(f, "r");
     int linesRead = 0;
-    List<Byte> bytes = new ArrayList<Byte>();
-    List<String> linesReversed = new ArrayList<String>();
+    List<Byte> bytes = new ArrayList<>();
+    List<String> linesReversed = new ArrayList<>();
     // Seek to end of file
     long length = raf.length() - 1;
     raf.seek(length);
@@ -1945,7 +1962,7 @@ public class IOUtils {
           str[i] = bytes.get(str.length - i - 1);
         }
         linesReversed.add(new String(str, encoding));
-        bytes = new ArrayList<Byte>();
+        bytes = new ArrayList<>();
         linesRead += 1;
         if (linesRead == n){
           break;
@@ -2026,6 +2043,59 @@ public class IOUtils {
     }
     //noinspection ResultOfMethodCallIgnored
     file.delete();
+  }
+
+  /**
+   * Start a simple console. Read lines from stdin, and pass each line to the callback.
+   * Returns on typing "exit" or "quit".
+   *
+   * @param callback The function to run for every line of input.
+   * @throws IOException Thrown from the underlying input stream.
+   */
+    public static void console(String prompt, Consumer<String> callback) throws IOException {
+    BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+    String line;
+    System.out.print(prompt);
+    while ( (line = reader.readLine()) != null) {
+      switch (line.toLowerCase()) {
+        case "":
+          break;
+        case "exit":
+        case "quit":
+        case "q":
+          return;
+        default:
+          callback.accept(line);
+          break;
+      }
+      System.out.print(prompt);
+    }
+  }
+
+  /**
+   * Create a prompt, and read a single line of response.
+   * @param prompt An optional prompt to show the user.
+   * @throws IOException Throw from the underlying reader.
+   */
+  public static String promptUserInput(Optional<String> prompt) throws IOException {
+    BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+    System.out.print(prompt.orElse("> "));
+    return reader.readLine();
+  }
+
+  /** @see IOUtils#console(String, Consumer) */
+  public static void console(Consumer<String> callback) throws IOException {
+    console("> ", callback);
+  }
+
+  public static String throwableToStackTrace(Throwable t) {
+    StringBuilder sb = new StringBuilder();
+    sb.append(t).append(eolChar);
+
+    for (StackTraceElement e : t.getStackTrace()) {
+        sb.append("\t at ").append(e).append(eolChar);
+    }
+    return sb.toString();
   }
 
 }

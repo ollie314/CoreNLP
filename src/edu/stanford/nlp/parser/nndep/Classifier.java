@@ -1,4 +1,5 @@
 package edu.stanford.nlp.parser.nndep;
+import edu.stanford.nlp.util.logging.Redwood;
 
 import edu.stanford.nlp.util.CollectionUtils;
 import edu.stanford.nlp.util.Pair;
@@ -13,8 +14,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.IntStream;
-
-import static java.util.stream.Collectors.toSet;
 
 /**
  * Neural network classifier which powers a transition-based dependency
@@ -35,7 +34,10 @@ import static java.util.stream.Collectors.toSet;
  * @author Danqi Chen
  * @author Jon Gauthier
  */
-public class Classifier {
+public class Classifier  {
+
+  /** A logger for this class */
+  private static Redwood.RedwoodChannels log = Redwood.channels(Classifier.class);
   // E: numFeatures x embeddingSize
   // W1: hiddenSize x (embeddingSize x numFeatures)
   // b1: hiddenSize
@@ -140,7 +142,7 @@ public class Classifier {
     numLabels = W2.length;
 
     preMap = new HashMap<>();
-    for (int i = 0; i < preComputed.size(); ++i)
+    for (int i = 0; i < preComputed.size() && i < config.numPreComputed; ++i)
       preMap.put(preComputed.get(i), i);
 
     isTraining = dataset != null;
@@ -524,7 +526,7 @@ public class Classifier {
     gradSaved = new double[preMap.size()][config.hiddenSize];
 
     int numChunks = config.trainingThreads;
-    List<Collection<Example>> chunks = CollectionUtils.partitionIntoFolds(examples, numChunks);
+    List<List<Example>> chunks = CollectionUtils.partitionIntoFolds(examples, numChunks);
 
     // Submit chunks for processing on separate threads
     for (Collection<Example> chunk : chunks)
@@ -590,10 +592,12 @@ public class Classifier {
       }
     }
 
-    for (int i = 0; i < E.length; ++i) {
-      for (int j = 0; j < E[i].length; ++j) {
-        eg2E[i][j] += gradE[i][j] * gradE[i][j];
-        E[i][j] -= adaAlpha * gradE[i][j] / Math.sqrt(eg2E[i][j] + adaEps);
+    if (config.doWordEmbeddingGradUpdate) {
+      for (int i = 0; i < E.length; ++i) {
+        for (int j = 0; j < E[i].length; ++j) {
+          eg2E[i][j] += gradE[i][j] * gradE[i][j];
+          E[i][j] -= adaAlpha * gradE[i][j] / Math.sqrt(eg2E[i][j] + adaEps);
+        }
       }
     }
   }
@@ -636,13 +640,7 @@ public class Classifier {
    * @see #preCompute(java.util.Set)
    */
   public void preCompute() {
-    // If no features are specified, pre-compute all of them (which fit
-    // into a `saved` array of size `config.numPreComputed`)
-    Set<Integer> keys = preMap.entrySet().stream()
-                              .filter(e -> e.getValue() < config.numPreComputed)
-                              .map(Map.Entry::getKey)
-                              .collect(toSet());
-    preCompute(keys);
+    preCompute(preMap.keySet());
   }
 
   /**
@@ -670,7 +668,7 @@ public class Classifier {
         for (int k = 0; k < config.embeddingSize; ++k)
           saved[mapX][j] += W1[j][pos * config.embeddingSize + k] * E[tok][k];
     }
-    System.err.println("PreComputed " + toPreCompute.size() + ", Elapsed Time: " + (System
+    log.info("PreComputed " + toPreCompute.size() + ", Elapsed Time: " + (System
         .currentTimeMillis() - startTime) / 1000.0 + " (s)");
   }
 
@@ -751,5 +749,4 @@ public class Classifier {
     for (int i = 0; i < a1.length; i++)
       a1[i] += a2[i];
   }
-
 }
