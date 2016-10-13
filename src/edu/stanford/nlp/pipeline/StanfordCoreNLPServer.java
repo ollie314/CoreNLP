@@ -17,6 +17,7 @@ import edu.stanford.nlp.trees.tregex.TregexPattern;
 import edu.stanford.nlp.trees.tregex.TregexMatcher;
 import edu.stanford.nlp.trees.*;
 import edu.stanford.nlp.util.*;
+import edu.stanford.nlp.util.logging.Redwood;
 
 import javax.net.ssl.*;
 import java.io.*;
@@ -29,6 +30,7 @@ import java.security.*;
 import java.security.cert.CertificateException;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -47,6 +49,8 @@ public class StanfordCoreNLPServer implements Runnable {
   protected HttpServer server;
   @ArgumentParser.Option(name="port", gloss="The port to run the server on")
   protected int serverPort = 9000;
+  @ArgumentParser.Option(name="status_port", gloss="The port to serve the status check endpoints on. If different from the server port, this will run in a separate thread.")
+  protected int statusPort = serverPort;
   @ArgumentParser.Option(name="timeout", gloss="The default timeout, in milliseconds")
   protected int timeoutMilliseconds = 15000;
   @ArgumentParser.Option(name="strict", gloss="If true, obey strict HTTP standards (e.g., with encoding)")
@@ -55,14 +59,16 @@ public class StanfordCoreNLPServer implements Runnable {
   protected boolean quiet = false;
   @ArgumentParser.Option(name="ssl", gloss="If true, start the server with an [insecure!] SSL connection")
   protected boolean ssl = false;
+  @ArgumentParser.Option(name="key", gloss="The *.jks key file to load, if -ssl is enabled. By default, it'll load the dummy key from the jar (but this is, of course, insecure!)")
+  protected static String key = "edu/stanford/nlp/pipeline/corenlp.jks";
   @ArgumentParser.Option(name="username", gloss="The username component of a username/password basic auth credential")
   protected String username = null;
   @ArgumentParser.Option(name="password", gloss="The password component of a username/password basic auth credential")
   protected String password = null;
-  @ArgumentParser.Option(name="lazy", gloss="If true, don't precompute the models on loading the server")
-  protected boolean lazy = true;
   @ArgumentParser.Option(name="annotators", gloss="The default annotators to run over a given sentence.")
   protected static String defaultAnnotators = "tokenize,ssplit,pos,lemma,ner,parse,depparse,mention,coref,natlog,openie,regexner,kbp";
+  @ArgumentParser.Option(name="preload", gloss="Cache the following annotators on startup")
+  protected static String preloadedAnnotators = "";
 
   protected final String shutdownKey;
 
@@ -72,7 +78,7 @@ public class StanfordCoreNLPServer implements Runnable {
   /**
    * The thread pool for the HTTP server.
    */
-  private final ExecutorService serverExecutor = Executors.newFixedThreadPool(ArgumentParser.threads);
+  private final ExecutorService serverExecutor;
   /**
    * To prevent grossly wasteful over-creation of pipeline objects, cache the last
    * few we created, until the garbage collector decides we can kill them.
@@ -81,7 +87,7 @@ public class StanfordCoreNLPServer implements Runnable {
   /**
    * An executor to time out CoreNLP execution with.
    */
-  private final ExecutorService corenlpExecutor = Executors.newFixedThreadPool(ArgumentParser.threads);
+  private final ExecutorService corenlpExecutor;
 
 
   /**
@@ -100,12 +106,13 @@ public class StanfordCoreNLPServer implements Runnable {
 
   /**
    * Create a new Stanford CoreNLP Server, with the default parameters
-   * @throws IOException
+   *
+   * @throws IOException Thrown if we could not write the shutdown key to the a file.
    */
   public StanfordCoreNLPServer() throws IOException {
-    defaultProps = PropertiesUtils.asProperties(
+    this.defaultProps = PropertiesUtils.asProperties(
         "annotators", defaultAnnotators,  // Run these annotators by default
-        "coref.md.type", "dep",  // Use dependency trees with coref by default
+        "mention.type", "dep",  // Use dependency trees with coref by default
         "coref.mode",  "statistical",  // Use the new coref
         "coref.language",  "en",  // We're English by default
         "inputFormat", "text",   // By default, treat the POST data like text
@@ -114,6 +121,8 @@ public class StanfordCoreNLPServer implements Runnable {
         "parse.model", "edu/stanford/nlp/models/srparser/englishSR.ser.gz",  // SR scales linearly with sentence length. Good for a server!
         "parse.binaryTrees", "true",  // needed for the Sentiment annotator
         "openie.strip_entailments", "true");  // these are large to serialize, so ignore them
+    this.serverExecutor = Executors.newFixedThreadPool(ArgumentParser.threads);
+    this.corenlpExecutor = Executors.newFixedThreadPool(ArgumentParser.threads);
 
     // Generate and write a shutdown key
     String tmpDir = System.getProperty("java.io.tmpdir");
@@ -327,6 +336,60 @@ public class StanfordCoreNLPServer implements Runnable {
       httpExchange.close();
     }
   }
+
+
+  /**
+   * A handler to let the caller know if the server is alive AND ready to respond to requests.
+   */
+  protected static class ReadyHandler implements HttpHandler {
+    /** If true, the server is runnning and ready for requets. */
+    public final AtomicBoolean serverReady;
+    /** The creation time of this handler. This is used to tell the caller how long we've been waiting for. */
+    public final long startTime;
+
+    /** The trivial constructor. */
+    public ReadyHandler(AtomicBoolean serverReady) {
+      this.serverReady = serverReady;
+      this.startTime = System.currentTimeMillis();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void handle(HttpExchange httpExchange) throws IOException {
+      // Return a simple text message that says pong.
+      httpExchange.getResponseHeaders().set("Content-type", "text/plain");
+      String response;
+      int status;
+      if (this.serverReady.get()) {
+        response = "ready\n";
+        status = HTTP_OK;
+      } else {
+        response = "server is not ready yet. uptime=" + Redwood.formatTimeDifference(System.currentTimeMillis() - this.startTime) + "\n";
+        status = HTTP_UNAVAILABLE;
+      }
+      httpExchange.sendResponseHeaders(status, response.getBytes().length);
+      httpExchange.getResponseBody().write(response.getBytes());
+      httpExchange.close();
+    }
+  }
+
+
+  /**
+   * A handler to let the caller know if the server is alive,
+   * but not necessarily ready to respond to requests.
+   */
+  protected static class LiveHandler implements HttpHandler {
+    @Override
+    public void handle(HttpExchange httpExchange) throws IOException {
+      // Return a simple text message that says pong.
+      httpExchange.getResponseHeaders().set("Content-type", "text/plain");
+      String response = "live\n";
+      httpExchange.sendResponseHeaders(HTTP_OK, response.getBytes().length);
+      httpExchange.getResponseBody().write(response.getBytes());
+      httpExchange.close();
+    }
+  }
+
 
   /**
    * Sending the appropriate shutdown key will gracefully shutdown the server.
@@ -583,52 +646,34 @@ public class StanfordCoreNLPServer implements Runnable {
       } else if (urlParams.containsKey("props")) {
         urlProperties = StringUtils.decodeMap(URLDecoder.decode(urlParams.get("props"), "UTF-8"));
       }
-      System.out.println(urlProperties);
+
+      // check to see if a specific language was set, use language specific properties
+      if (urlProperties.containsKey("pipelineLanguage")) {
+        String languagePropertiesFile = LanguageInfo.getLanguagePropertiesFile(urlProperties.get("pipelineLanguage"));
+        Properties languageSpecificProperties = new Properties();
+        try {
+          languageSpecificProperties.load(StanfordCoreNLPServer.class.getResourceAsStream(languagePropertiesFile));
+          PropertiesUtils.overWriteProperties(props,languageSpecificProperties);
+        } catch (IOException e) {
+          err("Failure to load language specific properties.");
+        }
+      }
+
       // (tweak the default properties a bit)
-      if (!props.containsKey("coref.md.type")) {
+      if (!props.containsKey("mention.type")) {
         // Set coref head to use dependencies
-        props.setProperty("coref.md.type", "dep");
+        props.setProperty("mention.type", "dep");
         if (urlProperties.containsKey("annotators") && urlProperties.get("annotators") != null &&
             ArrayUtils.contains(urlProperties.get("annotators").split(","), "parse")) {
           // (case: the properties have a parse annotator --
           //        we don't have to use the dependency mention finder)
-          props.remove("coref.md.type");
+          props.remove("mention.type");
         }
       }
+
       // (add new properties on top of the default properties)
       urlProperties.entrySet()
           .forEach(entry -> props.setProperty(entry.getKey(), entry.getValue()));
-
-      // if a language is specified, load the properties for that language, don't overwrite other properties
-      if (props.containsKey("pipelineLanguage")) {
-        String pipelineLanguageFile = LanguageInfo.getLanguagePropertiesFile(props.getProperty("pipelineLanguage"));
-        if (pipelineLanguageFile == null) {
-          String clientResponse = "specified language is not supported: "+props.getProperty("pipelineLanguage")
-                  +" ; defaulting to English";
-          try {
-            respondError(clientResponse, httpExchange);
-          } catch (IOException e) {
-            err("failed to send client response: \""+clientResponse+"\"");
-          }
-        }
-        try {
-          Properties languageProps = new Properties();
-          languageProps.load(StanfordCoreNLPServer.class.getResourceAsStream(pipelineLanguageFile));
-          PropertiesUtils.noClobberWriteProperties(props, languageProps);
-        } catch (IOException e) {
-          // server side log missing resource for requested language
-          String errorMessage = "missing properties file: "
-                  +pipelineLanguageFile+" ; this file is required on server CLASSPATH to process language: "
-                  +props.getProperty("pipelineLanguage");
-          err(errorMessage);
-          // client side log missing resource for requested language
-          try {
-            respondError(errorMessage, httpExchange);
-          } catch (IOException ioe) {
-            err("failed to send client response: \""+errorMessage+"\"");
-          }
-        }
-      }
 
       // Get the annotators
       String annotators = props.getProperty("annotators");
@@ -942,7 +987,7 @@ public class StanfordCoreNLPServer implements Runnable {
           TregexPattern p = TregexPattern.compile(pattern);
 
           // Run Tregex
-          return Pair.makePair(JSONOutputter.JSONWriter.objectToJSON((docWriter) -> {
+          return Pair.makePair(JSONOutputter.JSONWriter.objectToJSON((docWriter) ->
             docWriter.set("sentences", doc.get(CoreAnnotations.SentencesAnnotation.class).stream().map(sentence -> (Consumer<JSONOutputter.Writer>) (JSONOutputter.Writer sentWriter) -> {
                 Tree tree = sentence.get(TreeCoreAnnotations.TreeAnnotation.class);
                 //sentWriter.set("tree", tree.pennString());
@@ -952,14 +997,14 @@ public class StanfordCoreNLPServer implements Runnable {
                 while (matcher.find()) {
                   sentWriter.set(Integer.toString(i++), (Consumer<JSONOutputter.Writer>) (JSONOutputter.Writer matchWriter) -> {
                     matchWriter.set("match", matcher.getMatch().pennString());
-                    matchWriter.set("namedNodes", matcher.getNodeNames().stream().map(nodeName -> (Consumer<JSONOutputter.Writer>) (JSONOutputter.Writer namedNodeWriter) -> {
-                      namedNodeWriter.set(nodeName, matcher.getNode(nodeName).pennString());
-                    }));
+                    matchWriter.set("namedNodes", matcher.getNodeNames().stream().map(nodeName -> (Consumer<JSONOutputter.Writer>) (JSONOutputter.Writer namedNodeWriter) ->
+                      namedNodeWriter.set(nodeName, matcher.getNode(nodeName).pennString())
+                    ));
                   });
 
                 }
-            }));
-          }), doc);
+            }))
+          ), doc);
         } catch (Exception e) {
           e.printStackTrace();
           try {
@@ -997,10 +1042,14 @@ public class StanfordCoreNLPServer implements Runnable {
 
 
   private static HttpsServer addSSLContext(HttpsServer server) {
-    log("Adding SSL context to server");
+    log("Adding SSL context to server; key=" + StanfordCoreNLPServer.key);
     try {
       KeyStore ks = KeyStore.getInstance("JKS");
-      ks.load(IOUtils.getInputStreamFromURLOrClasspathOrFileSystem("edu/stanford/nlp/pipeline/corenlp.jks"), "corenlp".toCharArray());
+      if (StanfordCoreNLPServer.key != null && IOUtils.existsInClasspathOrFileSystem(StanfordCoreNLPServer.key)) {
+        ks.load(IOUtils.getInputStreamFromURLOrClasspathOrFileSystem(key), "corenlp".toCharArray());
+      } else {
+        throw new IllegalArgumentException("Could not find SSL keystore at " + StanfordCoreNLPServer.key);
+      }
       KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
       kmf.init(ks, "corenlp".toCharArray());
       SSLContext sslContext = SSLContext.getInstance("TLS");
@@ -1027,6 +1076,39 @@ public class StanfordCoreNLPServer implements Runnable {
 
 
   /**
+   * If we have a separate liveness port, start a server on a separate thread pool whose only
+   * job is to watch for when the CoreNLP server becomes ready.
+   * This will also immediately signal liveness.
+   *
+   * @param live The boolean to track when CoreNLP has initialized and the server is ready
+   *             to serve requests.
+   */
+  private void livenessServer(AtomicBoolean live) {
+    if (this.serverPort != this.statusPort) {
+      try {
+        // Create the server
+        if (this.ssl) {
+          server = addSSLContext(HttpsServer.create(new InetSocketAddress(statusPort), 0)); // 0 is the default 'backlog'
+        } else {
+          server = HttpServer.create(new InetSocketAddress(statusPort), 0); // 0 is the default 'backlog'
+        }
+        // Add the two status endpoints
+        withAuth(server.createContext("/live", new LiveHandler()), Optional.empty());
+        withAuth(server.createContext("/ready", new ReadyHandler(live)), Optional.empty());
+        // Start the server
+        ExecutorService statusExecutor = Executors.newFixedThreadPool(2);  // give the status executor its own thread pool
+        server.setExecutor(statusExecutor);
+        server.start();
+        // Server started
+        log("Liveness server started at " + server.getAddress());
+      } catch (IOException e) {
+        err("Could not start liveness server. This will probably result in very bad things happening soon.", e);
+      }
+    }
+  }
+
+
+  /**
    * Returns the implementing Http server.
    */
   public Optional<HttpServer> getServer() {
@@ -1034,13 +1116,16 @@ public class StanfordCoreNLPServer implements Runnable {
   }
 
 
-  /** @see StanfordCoreNLPServer#run(Optional, Predicate, Consumer, StanfordCoreNLPServer.FileHandler, boolean) */
+
+  /** @see StanfordCoreNLPServer#run(Optional, Predicate, Consumer, StanfordCoreNLPServer.FileHandler, boolean, AtomicBoolean) */
   @Override
   public void run() {
     // Set the static page handler
     try {
+      AtomicBoolean live = new AtomicBoolean(false);
+      this.livenessServer(live);
       FileHandler homepage = new FileHandler("edu/stanford/nlp/pipeline/demo/corenlp-brat.html");
-      run(Optional.empty(), req -> true, obj -> {}, homepage, false);
+      run(Optional.empty(), req -> true, obj -> {}, homepage, false, live);
     } catch (IOException e) {
       throw new RuntimeIOException(e);
     }
@@ -1067,7 +1152,12 @@ public class StanfordCoreNLPServer implements Runnable {
    * Run the server.
    * This method registers the handlers, and initializes the HTTP server.
    */
-  public void run(Optional<Pair<String,String>> basicAuth, Predicate<Properties> authenticator, Consumer<FinishedRequest> callback, FileHandler homepage, boolean https) {
+  public void run(Optional<Pair<String,String>> basicAuth,
+                  Predicate<Properties> authenticator,
+                  Consumer<FinishedRequest> callback,
+                  FileHandler homepage,
+                  boolean https,
+                  AtomicBoolean live) {
     try {
       if (https) {
         server = addSSLContext(HttpsServer.create(new InetSocketAddress(serverPort), 0)); // 0 is the default 'backlog'
@@ -1081,10 +1171,16 @@ public class StanfordCoreNLPServer implements Runnable {
       withAuth(server.createContext("/corenlp-brat.js", new FileHandler("edu/stanford/nlp/pipeline/demo/corenlp-brat.js", "application/javascript")), basicAuth);
       withAuth(server.createContext("/corenlp-brat.cs", new FileHandler("edu/stanford/nlp/pipeline/demo/corenlp-brat.css", "text/css")), basicAuth);
       withAuth(server.createContext("/corenlp-parseviewer.js", new FileHandler("edu/stanford/nlp/pipeline/demo/corenlp-parseviewer.js", "application/javascript")), basicAuth);
-      withAuth(server.createContext("/ping", new PingHandler()), basicAuth);
+      withAuth(server.createContext("/ping", new PingHandler()), Optional.empty());
       withAuth(server.createContext("/shutdown", new ShutdownHandler()), basicAuth);
+      if (this.serverPort == this.statusPort) {
+        withAuth(server.createContext("/live", new LiveHandler()), Optional.empty());
+        withAuth(server.createContext("/ready", new ReadyHandler(live)), Optional.empty());
+
+      }
       server.setExecutor(serverExecutor);
       server.start();
+      live.set(true);
       log("StanfordCoreNLPServer listening at " + server.getAddress());
     } catch (IOException e) {
       e.printStackTrace();
@@ -1100,9 +1196,23 @@ public class StanfordCoreNLPServer implements Runnable {
    * @throws IOException Thrown if we could not start / run the server.
    */
   public static void main(String[] args) throws IOException {
+    // Add a bit of logging
+    log("--- " + StanfordCoreNLPServer.class.getSimpleName() + "#main() called ---");
+    String build = System.getenv("BUILD");
+    if (build != null) {
+      log("    Build: " + build);
+    }
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> log("CoreNLP Server is shutting down.")));
+
+    // Fill arguments
     ArgumentParser.fillOptions(StanfordCoreNLPServer.class, args);
     StanfordCoreNLPServer server = new StanfordCoreNLPServer();
     ArgumentParser.fillOptions(server, args);
+    log("    Threads: " + ArgumentParser.threads);
+
+    // Start the liveness server
+    AtomicBoolean live = new AtomicBoolean(false);
+    server.livenessServer(live);
 
     // Create the homepage
     FileHandler homepage;
@@ -1113,12 +1223,14 @@ public class StanfordCoreNLPServer implements Runnable {
     }
 
     // Pre-load the models
-    if (!server.lazy) {
-      Properties props = server.defaultProps;
+    if (StanfordCoreNLPServer.preloadedAnnotators != null && !"".equals(StanfordCoreNLPServer.preloadedAnnotators.trim())) {
+      Properties props = new Properties();
+      server.defaultProps.entrySet().forEach(entry -> props.setProperty(entry.getKey().toString(), entry.getValue().toString()));
+      props.setProperty("annotators", StanfordCoreNLPServer.preloadedAnnotators);
       try {
         new StanfordCoreNLP(props);
       } catch (Throwable ignored) {
-        err("Could not pre-cache annotators in server; encountered exception:");
+        err("Could not pre-load annotators in server; encountered exception:");
         ignored.printStackTrace();
       }
     }
@@ -1132,9 +1244,9 @@ public class StanfordCoreNLPServer implements Runnable {
     // Run the server
     log("Starting server...");
     if (server.ssl) {
-      server.run(credentials, req -> true, res -> {}, homepage, true);
+      server.run(credentials, req -> true, res -> {}, homepage, true, live);
     } else {
-      server.run(credentials, req -> true, res -> {}, homepage, false);
+      server.run(credentials, req -> true, res -> {}, homepage, false, live);
 
     }
   }
